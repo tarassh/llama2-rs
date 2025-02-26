@@ -1,6 +1,8 @@
 use clap::{Command, Arg};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use llama2_rs::model::Transformer;
+
 fn main() {
     let matches = Command::new("run")
         .version("1.0")
@@ -101,5 +103,8 @@ fn main() {
     println!("Mode: {}", mode);
     println!("System prompt: {}", system_prompt);
 
-    // Your code to run the model with the specified options goes here
+    // Load the model
+    let model = Transformer::read_checkpoint(checkpoint).unwrap();
+    println!("Model loaded successfully!");
+
 }
