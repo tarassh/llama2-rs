@@ -105,7 +105,7 @@ fn main() {
     println!("System prompt: {}", system_prompt);
 
     // Load the model
-    let model = Transformer::read_checkpoint(checkpoint).unwrap();
+    let mut model = Transformer::read_checkpoint(checkpoint).unwrap();
     if steps == 0 || steps > model.config.seq_len {
         steps = model.config.seq_len;
     }
@@ -118,7 +118,7 @@ fn main() {
 
     match mode {
         "generate" => {
-            llama2_rs::generate(&model, &mut tokenizer, &mut sampler, input_prompt, steps).unwrap();
+            llama2_rs::generate(&mut model, &mut tokenizer, &mut sampler, input_prompt, steps).unwrap();
         }
         _ => {
             println!("Invalid mode: {}", mode);

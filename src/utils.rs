@@ -1,5 +1,26 @@
 use rayon::prelude::*;
 
+/// Root Mean Square (RMS) Normalization
+/// Normalizes input x using RMS norm and scales with weights
+pub fn rmsnorm(o: &mut [f32], x: &[f32], weight: &[f32], size: usize) {
+    debug_assert_eq!(o.len(), size);
+    debug_assert_eq!(x.len(), size);
+    debug_assert_eq!(weight.len(), size);
+
+    // Calculate sum of squares
+    let ss = x.iter()
+        .map(|&xi| xi * xi)
+        .sum::<f32>() / size as f32;
+    
+    // Add epsilon and take inverse square root
+    let scale = 1.0 / (ss + 1e-5f32).sqrt();
+    
+    // Normalize and scale
+    for j in 0..size {
+        o[j] = weight[j] * (scale * x[j]);
+    }
+}
+
 /// Apply softmax normalization in-place
 pub fn softmax(x: &mut [f32]) {
     // Find max value (for numerical stability)

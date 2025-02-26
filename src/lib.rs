@@ -16,7 +16,7 @@ pub fn time_in_ms() -> u128 {
         .as_millis()
 }
 
-pub fn generate(transformer: &Transformer, tokenizer: &mut Tokenizer, sampler: &mut Sampler, input_prompt: &str, steps: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn generate(transformer: &mut Transformer, tokenizer: &mut Tokenizer, sampler: &mut Sampler, input_prompt: &str, steps: i32) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 
     // Use empty string if input_prompt is empty
@@ -35,7 +35,7 @@ pub fn generate(transformer: &Transformer, tokenizer: &mut Tokenizer, sampler: &
 
     while pos < steps {
         // Forward the transformer to get logits for the next token
-        let logits = transformer.forward(&[token])?;
+        let logits = transformer.forward(token, pos)?;
 
         // Advance the state machine
         let next = if (pos as usize) < prompt_tokens.len() - 1 {
