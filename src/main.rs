@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use llama2_rs::model::Transformer;
 use llama2_rs::tokenizer::Tokenizer;
-
+use llama2_rs::sampler::Sampler;
 fn main() {
     let matches = Command::new("run")
         .version("1.0")
@@ -112,4 +112,7 @@ fn main() {
 
     // Load the tokenizer
     let tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size).unwrap();
+
+    // Load the sampler
+    let sampler = Sampler::new(model.config.vocab_size, temperature, p_value, seed);
 }
