@@ -49,8 +49,6 @@ pub struct RunState {
     pub hb: Vec<f32>,   // buffer for hidden dimension in the ffn (hidden_dim,)
     pub hb2: Vec<f32>,  // buffer for hidden dimension in the ffn (hidden_dim,)
     pub q: Vec<f32>,    // query (dim,)
-    pub k: Vec<f32>,    // key (dim,)
-    pub v: Vec<f32>,    // value (dim,)
     pub att: Vec<f32>,  // buffer for scores/attention values (n_heads, seq_len)
     pub logits: Vec<f32>, // output logits
     // kv cache
@@ -221,8 +219,22 @@ impl Transformer {
             
             // QKV matmuls for this position
             matmul(&mut s.q, &s.xb, &w.wq[l * dim * dim..(l + 1) * dim * dim], dim, dim);
-            matmul(&mut s.k[pos_offset..], &s.xb, &w.wk[l * dim * kv_dim as usize..(l + 1) * dim * kv_dim as usize], dim, kv_dim as usize);
-            matmul(&mut s.v[pos_offset..], &s.xb, &w.wv[l * dim * kv_dim as usize..(l + 1) * dim * kv_dim as usize], dim, kv_dim as usize);
+            
+            // Write directly into the key and value caches
+            matmul(
+                &mut s.key_cache[pos_offset..pos_offset + kv_dim as usize],
+                &s.xb,
+                &w.wk[l * dim * kv_dim as usize..(l + 1) * dim * kv_dim as usize],
+                dim,
+                kv_dim as usize
+            );
+            matmul(
+                &mut s.value_cache[pos_offset..pos_offset + kv_dim as usize],
+                &s.xb,
+                &w.wv[l * dim * kv_dim as usize..(l + 1) * dim * kv_dim as usize],
+                dim,
+                kv_dim as usize
+            );
 
             // RoPE relative positional encoding
             for i in (0..dim).step_by(2) {
@@ -234,7 +246,11 @@ impl Transformer {
                 let rotn = if i < kv_dim as usize { 2 } else { 1 }; // how many vectors? 2 = q & k, 1 = q only
                 
                 for v in 0..rotn {
-                    let vec = if v == 0 { &mut s.q } else { &mut s.k[pos_offset..] };
+                    let vec = if v == 0 {
+                        &mut s.q
+                    } else {
+                        &mut s.key_cache[pos_offset..pos_offset + kv_dim as usize]
+                    };
                     let v0 = vec[i];
                     let v1 = vec[i + 1];
                     vec[i] = v0 * fcr - v1 * fci;
@@ -341,6 +357,8 @@ impl RunState {
         let n_heads = config.n_heads as usize;
         let seq_len = config.seq_len as usize;
         let n_layers = config.n_layers as usize;
+        let vocab_size = config.vocab_size as usize;
+        let kv_dim = (config.dim * config.n_kv_heads / config.n_heads) as usize;
 
         RunState {
             x: vec![0.0; dim],
@@ -349,12 +367,10 @@ impl RunState {
             hb: vec![0.0; hidden_dim],
             hb2: vec![0.0; hidden_dim],
             q: vec![0.0; dim],
-            k: vec![0.0; dim],
-            v: vec![0.0; dim],
             att: vec![0.0; n_heads * seq_len],
-            logits: vec![0.0; dim],
-            key_cache: vec![0.0; n_layers * seq_len * dim],
-            value_cache: vec![0.0; n_layers * seq_len * dim],
+            logits: vec![0.0; vocab_size],
+            key_cache: vec![0.0; n_layers * seq_len * kv_dim],
+            value_cache: vec![0.0; n_layers * seq_len * kv_dim],
         }
     }
 }
