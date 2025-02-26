@@ -111,8 +111,18 @@ fn main() {
     }
 
     // Load the tokenizer
-    let tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size).unwrap();
+    let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size).unwrap();
 
     // Load the sampler
     let sampler = Sampler::new(model.config.vocab_size, temperature, p_value, seed);
+
+    match mode {
+        "generate" => {
+            llama2_rs::generate(&model, &mut tokenizer, &sampler, input_prompt, steps).unwrap();
+        }
+        _ => {
+            println!("Invalid mode: {}", mode);
+            return;
+        }
+    }
 }
