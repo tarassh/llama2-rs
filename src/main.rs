@@ -2,6 +2,7 @@ use clap::{Command, Arg};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use llama2_rs::model::Transformer;
+use llama2_rs::tokenizer::Tokenizer;
 
 fn main() {
     let matches = Command::new("run")
@@ -105,6 +106,10 @@ fn main() {
 
     // Load the model
     let model = Transformer::read_checkpoint(checkpoint).unwrap();
-    println!("Model loaded successfully!");
+    if steps == 0 || steps > model.config.seq_len {
+        steps = model.config.seq_len;
+    }
 
+    // Load the tokenizer
+    let tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size).unwrap();
 }
