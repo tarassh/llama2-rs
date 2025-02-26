@@ -131,32 +131,65 @@ impl Transformer {
         let hidden_dim = config.hidden_dim as usize;
         let n_layers = config.n_layers as usize;
         let vocab_size = config.vocab_size as usize;
+        let head_size = dim / config.n_heads as usize;
+        let n_heads = config.n_heads as usize;
+        let n_kv_heads = config.n_kv_heads as usize;
+        let seq_len = config.seq_len as usize;
         
-        // Helper to get a slice of the weight data
+        // Helper to get or skip weights
         let mut offset = 0;
-        let mut get_weights = |size: usize| {
+        let mut get_weights = |size: usize, skip: bool| {
             let slice = &weight_data[offset..offset + size];
             offset += size;
-            slice.to_vec()
+            if skip {
+                vec![] // Return empty vec when skipping
+            } else {
+                slice.to_vec()
+            }
         };
+
+        // Get token embeddings
+        let token_embedding_table = get_weights(vocab_size * dim, false);
+        
+        // Get attention weights
+        let rms_att_weight = get_weights(n_layers * dim, false);
+        
+        // Get query, key, value projection weights
+        let wq = get_weights(n_layers * dim * (n_heads * head_size), false);
+        let wk = get_weights(n_layers * dim * (n_kv_heads * head_size), false);
+        let wv = get_weights(n_layers * dim * (n_kv_heads * head_size), false);
+        let wo = get_weights(n_layers * (n_heads * head_size) * dim, false);
+        
+        // Get FFN weights
+        let rms_ffn_weight = get_weights(n_layers * dim, false);
+        let w1 = get_weights(n_layers * dim * hidden_dim, false);
+        let w2 = get_weights(n_layers * hidden_dim * dim, false);
+        let w3 = get_weights(n_layers * dim * hidden_dim, false);
+        
+        // Get final normalization weights
+        let rms_final_weight = get_weights(dim, false);
+        
+        // Skip RoPE frequency tables
+        get_weights(seq_len * head_size / 2, true); // skip freq_cis_real
+        get_weights(seq_len * head_size / 2, true); // skip freq_cis_imag
 
         // Create the weights structure
         let weights = TransformerWeights {
-            token_embedding_table: get_weights(vocab_size * dim),
-            rms_att_weight: get_weights(n_layers * dim),
-            rms_ffn_weight: get_weights(n_layers * dim),
-            wq: get_weights(n_layers * dim * dim),
-            wk: get_weights(n_layers * dim * dim),
-            wv: get_weights(n_layers * dim * dim),
-            wo: get_weights(n_layers * dim * dim),
-            w1: get_weights(n_layers * hidden_dim * dim),
-            w2: get_weights(n_layers * dim * hidden_dim),
-            w3: get_weights(n_layers * hidden_dim * dim),
-            rms_final_weight: get_weights(dim),
+            token_embedding_table,
+            rms_att_weight,
+            rms_ffn_weight,
+            wq,
+            wk,
+            wv,
+            wo,
+            w1,
+            w2,
+            w3,
+            rms_final_weight,
             wcls: if shared_weights {
                 None
             } else {
-                Some(get_weights(vocab_size * dim))
+                Some(get_weights(vocab_size * dim, false))
             },
         };
 
