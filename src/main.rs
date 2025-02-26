@@ -1,4 +1,5 @@
 use clap::{Command, Arg};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     let matches = Command::new("run")
@@ -15,19 +16,19 @@ fn main() {
             .short('t')
             .long("temperature")
             .value_name("float")
-            .help("temperature in [0,inf], default 1.0")
+            .help("temperature in [0,inf], default 1.0 (0.0 = greedy deterministic, 1.0 = original)")
             .value_parser(clap::value_parser!(f32)))
         .arg(Arg::new("p_value")
             .short('p')
             .long("p_value")
             .value_name("float")
-            .help("p value in top-p (nucleus) sampling in [0,1], default 0.9")
+            .help("p value in top-p (nucleus) sampling in [0,1], default 0.9 (1.0 = off)")
             .value_parser(clap::value_parser!(f32)))
         .arg(Arg::new("seed")
             .short('s')
             .long("seed")
             .value_name("int")
-            .help("random seed, default time(NULL)")
+            .help("random seed, default: current time")
             .value_parser(clap::value_parser!(u64)))
         .arg(Arg::new("steps")
             .short('n')
@@ -45,7 +46,7 @@ fn main() {
             .short('z')
             .long("tokenizer")
             .value_name("string")
-            .help("optional path to custom tokenizer")
+            .help("path to tokenizer, default: tokenizer.bin")
             .value_parser(clap::value_parser!(String)))
         .arg(Arg::new("mode")
             .short('m')
@@ -61,16 +62,35 @@ fn main() {
             .value_parser(clap::value_parser!(String)))
         .get_matches();
 
+    // Get current time as default seed
+    let default_seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    // Get and validate parameters
     let checkpoint = matches.get_one::<String>("checkpoint").unwrap();
-    let temperature = matches.get_one::<f32>("temperature").copied().unwrap_or(1.0);
-    let p_value = matches.get_one::<f32>("p_value").copied().unwrap_or(0.9);
-    let seed = matches.get_one::<u64>("seed").copied().unwrap_or(0);
-    let steps = matches.get_one::<i32>("steps").copied().unwrap_or(256);
+    
+    let mut temperature = matches.get_one::<f32>("temperature").copied().unwrap_or(1.0);
+    temperature = temperature.max(0.0); // ensure temperature >= 0.0
+    
+    let mut p_value = matches.get_one::<f32>("p_value").copied().unwrap_or(0.9);
+    p_value = p_value.clamp(0.0, 1.0); // ensure p_value in [0.0, 1.0]
+    
+    let mut seed = matches.get_one::<u64>("seed").copied().unwrap_or(0);
+    if seed == 0 {
+        seed = default_seed;
+    }
+    
+    let mut steps = matches.get_one::<i32>("steps").copied().unwrap_or(256);
+    steps = steps.max(0); // ensure steps >= 0
+    
     let input_prompt = matches.get_one::<String>("input_prompt").map(|s| s.as_str()).unwrap_or("");
     let tokenizer = matches.get_one::<String>("tokenizer").map(|s| s.as_str()).unwrap_or("tokenizer.bin");
     let mode = matches.get_one::<String>("mode").map(|s| s.as_str()).unwrap_or("generate");
     let system_prompt = matches.get_one::<String>("system_prompt").map(|s| s.as_str()).unwrap_or("");
 
+    // Debug output
     println!("Checkpoint: {}", checkpoint);
     println!("Temperature: {}", temperature);
     println!("P value: {}", p_value);
