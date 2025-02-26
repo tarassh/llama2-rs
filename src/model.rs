@@ -161,6 +161,16 @@ impl Transformer {
 
         Ok(weights)
     }
+
+    pub fn forward(&self, tokens: &[i32]) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+        let config = &self.config;
+        let weights = &self.weights;
+        let mut state = RunState::new(config);
+
+        // Token embedding
+        // For now, return empty logits
+        Ok(vec![0.0; config.vocab_size as usize])
+    }
 }
 
 // Helper implementation for RunState
