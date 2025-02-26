@@ -208,4 +208,27 @@ impl Tokenizer {
             Err(_) => Err(-1),
         }
     }
+
+    pub fn decode(&self, prev_token: i32, token: i32) -> String {
+        if token < 0 || token >= self.vocab_size {
+            return String::new();
+        }
+        
+        let token_str = &self.vocab[token as usize];
+        
+        // Handle BOS token (1): strip leading whitespace
+        if prev_token == 1 && token_str.starts_with(' ') {
+            return token_str[1..].to_string();
+        }
+
+        // Handle raw byte tokens in format '<0xXX>'
+        if token_str.len() == 6 && token_str.starts_with("<0x") && token_str.ends_with('>') {
+            if let Ok(byte_val) = u8::from_str_radix(&token_str[3..5], 16) {
+                // Return the corresponding byte piece
+                return String::from_utf8_lossy(&[self.byte_pieces[(byte_val as usize) * 2]]).into_owned();
+            }
+        }
+        
+        token_str.clone()
+    }
 } 
