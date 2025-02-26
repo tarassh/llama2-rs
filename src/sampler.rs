@@ -1,3 +1,5 @@
+use super::utils;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProbIndex {
     pub prob: f32,
@@ -30,24 +32,6 @@ impl Sampler {
             temperature,
             topp,
             rng_state: rng_seed,
-        }
-    }
-
-    // Apply softmax normalization in-place
-    fn softmax(x: &mut [f32]) {
-        // Find max value (for numerical stability)
-        let max_val = x.iter().fold(x[0], |max, &val| max.max(val));
-        
-        // exp and sum
-        let mut sum = 0.0f32;
-        for xi in x.iter_mut() {
-            *xi = (*xi - max_val).exp();
-            sum += *xi;
-        }
-        
-        // normalize
-        for xi in x.iter_mut() {
-            *xi /= sum;
         }
     }
 
@@ -153,7 +137,7 @@ impl Sampler {
             }
 
             // Apply softmax to get the probabilities for next token
-            Self::softmax(&mut logits);
+            utils::softmax(&mut logits);
 
             // Generate random float for sampling
             let coin = self.random_f32();

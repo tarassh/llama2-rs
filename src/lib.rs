@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod model;
 pub mod tokenizer;
 pub mod sampler;
+pub mod utils;
 
 /// Returns the current time in milliseconds since the Unix epoch
 pub fn time_in_ms() -> u128 {
