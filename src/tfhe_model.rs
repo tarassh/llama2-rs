@@ -1,10 +1,14 @@
 use crate::utils::{matmul, rmsnorm};
+use crate::tfhe_utils::EncryptedKeyLUT;
+
+use std::ops::{ Mul, Add };
+
 use memmap2::Mmap;
 use std::fs::File;
 use std::io::Read;
 use std::{mem, ptr};
 
-use tfhe::{ServerKey, FheInt32, FheInt128};
+use tfhe::{ServerKey, FheInt32, ClientKey, prelude::*};
 
 // Configuration for the transformer architecture
 #[derive(Debug)]
@@ -19,7 +23,7 @@ pub struct Config {
 }
 
 // Weights for the transformer model
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransformerWeights {
     // token embedding table
     pub token_embedding_table: Vec<f32>, // (vocab_size, dim)
@@ -39,6 +43,61 @@ pub struct TransformerWeights {
     pub rms_final_weight: Vec<f32>, // (dim,)
     // (optional) classifier weights for the logits, on the last layer
     pub wcls: Option<Vec<f32>>,
+}
+
+// Weights for the transformer model
+#[derive(Debug)]
+pub struct TfheTransformerWeights {
+    // token embedding table
+    pub token_embedding_table: EncryptedKeyLUT, // (vocab_size, dim)
+    // weights for rmsnorms
+    pub rms_att_weight: EncryptedKeyLUT, // (layer, dim) rmsnorm weights
+    pub rms_ffn_weight: EncryptedKeyLUT, // (layer, dim)
+    // weights for matmuls. note dim == n_heads * head_size
+    pub wq: EncryptedKeyLUT, // (layer, dim, n_heads * head_size)
+    pub wk: EncryptedKeyLUT, // (layer, dim, n_kv_heads * head_size)
+    pub wv: EncryptedKeyLUT, // (layer, dim, n_kv_heads * head_size)
+    pub wo: EncryptedKeyLUT, // (layer, n_heads * head_size, dim)
+    // weights for ffn
+    pub w1: EncryptedKeyLUT, // (layer, hidden_dim, dim)
+    pub w2: EncryptedKeyLUT, // (layer, dim, hidden_dim)
+    pub w3: EncryptedKeyLUT, // (layer, hidden_dim, dim)
+    // final rmsnorm
+    pub rms_final_weight: EncryptedKeyLUT, // (dim,)
+    // (optional) classifier weights for the logits, on the last layer
+    pub wcls: Option<EncryptedKeyLUT>,
+}
+
+impl TfheTransformerWeights {
+    pub fn new(weights: TransformerWeights, client_key: &ClientKey) -> Self {
+        let token_embedding_table = EncryptedKeyLUT::new(weights.token_embedding_table, client_key);
+        let rms_att_weight = EncryptedKeyLUT::new(weights.rms_att_weight, client_key);
+        let rms_ffn_weight = EncryptedKeyLUT::new(weights.rms_ffn_weight, client_key);
+        let wq = EncryptedKeyLUT::new(weights.wq, client_key);
+        let wk = EncryptedKeyLUT::new(weights.wk, client_key);
+        let wv = EncryptedKeyLUT::new(weights.wv, client_key);
+        let wo = EncryptedKeyLUT::new(weights.wo, client_key);
+        let w1 = EncryptedKeyLUT::new(weights.w1, client_key);
+        let w2 = EncryptedKeyLUT::new(weights.w2, client_key);
+        let w3 = EncryptedKeyLUT::new(weights.w3, client_key);
+        let rms_final_weight = EncryptedKeyLUT::new(weights.rms_final_weight, client_key);
+        let wcls = weights.wcls.map(|w| EncryptedKeyLUT::new(w, client_key));
+        
+        Self {
+            token_embedding_table,
+            rms_att_weight,
+            rms_ffn_weight,
+            wq,
+            wk,
+            wv,
+            wo,
+            w1,
+            w2,
+            w3,
+            rms_final_weight,
+            wcls,
+        }
+    }
 }
 
 // State for running the transformer
@@ -62,6 +121,7 @@ pub struct RunState {
 pub struct TfheTransformer {
     pub config: Config, // the hyperparameters of the architecture (the blueprint)
     pub weights: TransformerWeights, // the weights of the model
+    pub t_weights: TfheTransformerWeights, // the encrypted weights of the model
     pub state: RunState, // buffers for the "wave" of activations in the forward pass
     // Memory mapping related fields
     pub file: Option<std::fs::File>, // file handle for memory mapping
@@ -70,7 +130,7 @@ pub struct TfheTransformer {
 }
 
 impl TfheTransformer {
-    pub fn read_checkpoint(checkpoint_path: &str, server_key: ServerKey) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn read_checkpoint(checkpoint_path: &str, client_key: ClientKey, server_key: ServerKey) -> Result<Self, Box<dyn std::error::Error>> {
         // Open the file
         let mut file = File::open(checkpoint_path)?;
 
@@ -94,6 +154,7 @@ impl TfheTransformer {
 
         // Create weights from the mapped memory
         let weights = Self::memory_map_weights(&config, &mmap[weights_offset..], shared_weights)?;
+        let t_weights = TfheTransformerWeights::new(weights.clone(), &client_key);
 
         // Create run state buffers
         let state = RunState::new(&config);
@@ -101,6 +162,7 @@ impl TfheTransformer {
         Ok(TfheTransformer {
             config,
             weights,
+            t_weights,
             state,
             file: Some(file),
             mmap: Some(mmap),
@@ -202,9 +264,13 @@ impl TfheTransformer {
         let head_size = dim / p.n_heads as usize;
 
         // Copy the token embedding into x
-        let content_row =
-            &w.token_embedding_table[token as usize * dim..(token as usize + 1) * dim];
-        s.x.copy_from_slice(content_row);
+        // let content_row =
+        //     &w.token_embedding_table[token as usize * dim..(token as usize + 1) * dim];
+        let token_start = token.clone().mul(dim as i32);
+        let token_end = token.add(FheInt32::encrypt_trivial(1)).mul(dim as i32);
+
+        let content_row = self.t_weights.token_embedding_table.range_lookup(&token_start, &token_end);
+        s.x.copy_from_slice(&content_row);
 
         // Forward all the layers
         for l in 0..p.n_layers as usize {
@@ -405,10 +471,9 @@ impl RunState {
         let n_layers = config.n_layers as usize;
         let vocab_size = config.vocab_size as usize;
         let kv_dim = (config.dim * config.n_kv_heads / config.n_heads) as usize;
-
         RunState {
             x: vec![0.0; dim],
-            xb: vec![0.0; dim],
+            xb: vec![0.0; dim], 
             xb2: vec![0.0; dim],
             hb: vec![0.0; hidden_dim],
             hb2: vec![0.0; hidden_dim],

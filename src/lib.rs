@@ -8,8 +8,10 @@ pub mod sampler;
 pub mod tokenizer;
 pub mod utils;
 
-pub mod tfhe_tokenizer;
 pub mod tfhe_model;
+pub mod tfhe_tokenizer;
+pub mod tfhe_utils;
+
 /// Returns the current time in milliseconds since the Unix epoch
 pub fn time_in_ms() -> u128 {
     SystemTime::now()
