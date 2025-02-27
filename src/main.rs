@@ -119,21 +119,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("System prompt: {}", system_prompt);
 
     // Load the model
-    let mut model = Transformer::read_checkpoint(checkpoint)?;
-    if steps == 0 || steps > model.config.seq_len {
-        steps = model.config.seq_len;
+    let mut transformer = Transformer::read_checkpoint(checkpoint)?;
+    if steps == 0 || steps > transformer.config.seq_len {
+        steps = transformer.config.seq_len;
     }
 
     // Load the tokenizer
-    let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size)?;
+    let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, transformer.config.vocab_size)?;
 
     // Load the sampler
-    let mut sampler = Sampler::new(model.config.vocab_size, temperature, p_value, seed);
+    let mut sampler = Sampler::new(transformer.config.vocab_size, temperature, p_value, seed);
 
     match mode {
         "generate" => {
             llama2_rs::generate(
-                &mut model,
+                &mut transformer,
                 &mut tokenizer,
                 &mut sampler,
                 input_prompt,
