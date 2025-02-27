@@ -1,10 +1,10 @@
-use clap::{Command, Arg};
+use clap::{Arg, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use llama2_rs::model::Transformer;
-use llama2_rs::tokenizer::Tokenizer;
 use llama2_rs::sampler::Sampler;
-fn main() {
+use llama2_rs::tokenizer::Tokenizer;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("run")
         .version("1.0")
         .about("Runs the model with the specified options")
@@ -66,32 +66,46 @@ fn main() {
         .get_matches();
 
     // Get current time as default seed
-    let default_seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    let default_seed = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
     // Get and validate parameters
-    let checkpoint = matches.get_one::<String>("checkpoint").unwrap();
-    
-    let mut temperature = matches.get_one::<f32>("temperature").copied().unwrap_or(1.0);
+    let checkpoint = matches
+        .get_one::<String>("checkpoint")
+        .ok_or("Checkpoint is required")?;
+
+    let mut temperature = matches
+        .get_one::<f32>("temperature")
+        .copied()
+        .unwrap_or(1.0);
     temperature = temperature.max(0.0); // ensure temperature >= 0.0
-    
+
     let mut p_value = matches.get_one::<f32>("p_value").copied().unwrap_or(0.9);
     p_value = p_value.clamp(0.0, 1.0); // ensure p_value in [0.0, 1.0]
-    
+
     let mut seed = matches.get_one::<u64>("seed").copied().unwrap_or(0);
     if seed == 0 {
         seed = default_seed;
     }
-    
+
     let mut steps = matches.get_one::<i32>("steps").copied().unwrap_or(256);
     steps = steps.max(0); // ensure steps >= 0
-    
-    let input_prompt = matches.get_one::<String>("input_prompt").map(|s| s.as_str()).unwrap_or("");
-    let tokenizer = matches.get_one::<String>("tokenizer").map(|s| s.as_str()).unwrap_or("tokenizer.bin");
-    let mode = matches.get_one::<String>("mode").map(|s| s.as_str()).unwrap_or("generate");
-    let system_prompt = matches.get_one::<String>("system_prompt").map(|s| s.as_str()).unwrap_or("");
+
+    let input_prompt = matches
+        .get_one::<String>("input_prompt")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let tokenizer = matches
+        .get_one::<String>("tokenizer")
+        .map(|s| s.as_str())
+        .unwrap_or("tokenizer.bin");
+    let mode = matches
+        .get_one::<String>("mode")
+        .map(|s| s.as_str())
+        .unwrap_or("generate");
+    let system_prompt = matches
+        .get_one::<String>("system_prompt")
+        .map(|s| s.as_str())
+        .unwrap_or("");
 
     // Debug output
     println!("Checkpoint: {}", checkpoint);
@@ -105,24 +119,32 @@ fn main() {
     println!("System prompt: {}", system_prompt);
 
     // Load the model
-    let mut model = Transformer::read_checkpoint(checkpoint).unwrap();
+    let mut model = Transformer::read_checkpoint(checkpoint)?;
     if steps == 0 || steps > model.config.seq_len {
         steps = model.config.seq_len;
     }
 
     // Load the tokenizer
-    let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size).unwrap();
+    let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size)?;
 
     // Load the sampler
     let mut sampler = Sampler::new(model.config.vocab_size, temperature, p_value, seed);
 
     match mode {
         "generate" => {
-            llama2_rs::generate(&mut model, &mut tokenizer, &mut sampler, input_prompt, steps).unwrap();
+            llama2_rs::generate(
+                &mut model,
+                &mut tokenizer,
+                &mut sampler,
+                input_prompt,
+                steps,
+            )?;
         }
         _ => {
             println!("Invalid mode: {}", mode);
-            return;
+            return Err("Invalid mode".into());
         }
     }
+
+    Ok(())
 }

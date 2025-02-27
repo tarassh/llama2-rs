@@ -1,11 +1,11 @@
 use model::Transformer;
-use tokenizer::Tokenizer;
 use sampler::Sampler;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokenizer::Tokenizer;
 
 pub mod model;
-pub mod tokenizer;
 pub mod sampler;
+pub mod tokenizer;
 pub mod utils;
 
 /// Returns the current time in milliseconds since the Unix epoch
@@ -16,11 +16,21 @@ pub fn time_in_ms() -> u128 {
         .as_millis()
 }
 
-pub fn generate(transformer: &mut Transformer, tokenizer: &mut Tokenizer, sampler: &mut Sampler, input_prompt: &str, steps: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn generate(
+    transformer: &mut Transformer,
+    tokenizer: &mut Tokenizer,
+    sampler: &mut Sampler,
+    input_prompt: &str,
+    steps: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 
     // Use empty string if input_prompt is empty
-    let input_prompt = if input_prompt.is_empty() { "" } else { input_prompt };
+    let input_prompt = if input_prompt.is_empty() {
+        ""
+    } else {
+        input_prompt
+    };
 
     // Encode the prompt into tokens sequence
     let prompt_tokens = tokenizer.encode(input_prompt, 1, 0);

@@ -8,13 +8,11 @@ pub fn rmsnorm(o: &mut [f32], x: &[f32], weight: &[f32], size: usize) {
     debug_assert_eq!(weight.len(), size);
 
     // Calculate sum of squares
-    let ss = x.iter()
-        .map(|&xi| xi * xi)
-        .sum::<f32>() / size as f32;
-    
+    let ss = x.iter().map(|&xi| xi * xi).sum::<f32>() / size as f32;
+
     // Add epsilon and take inverse square root
     let scale = 1.0 / (ss + 1e-5f32).sqrt();
-    
+
     // Normalize and scale
     for j in 0..size {
         o[j] = weight[j] * (scale * x[j]);
@@ -25,14 +23,14 @@ pub fn rmsnorm(o: &mut [f32], x: &[f32], weight: &[f32], size: usize) {
 pub fn softmax(x: &mut [f32]) {
     // Find max value (for numerical stability)
     let max_val = x.iter().fold(x[0], |max, &val| max.max(val));
-    
+
     // exp and sum
     let mut sum = 0.0f32;
     for xi in x.iter_mut() {
         *xi = (*xi - max_val).exp();
         sum += *xi;
     }
-    
+
     // normalize
     for xi in x.iter_mut() {
         *xi /= sum;

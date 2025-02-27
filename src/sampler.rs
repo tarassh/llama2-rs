@@ -9,7 +9,7 @@ pub struct ProbIndex {
 #[derive(Debug)]
 pub struct Sampler {
     pub vocab_size: i32,
-    pub probindex: Vec<ProbIndex>,  // buffer used in top-p sampling
+    pub probindex: Vec<ProbIndex>, // buffer used in top-p sampling
     pub temperature: f32,
     pub topp: f32,
     pub rng_state: u64,
@@ -39,14 +39,14 @@ impl Sampler {
     fn sample_argmax(probabilities: &[f32]) -> i32 {
         let mut max_i = 0;
         let mut max_p = probabilities[0];
-        
+
         for i in 1..probabilities.len() {
             if probabilities[i] > max_p {
                 max_i = i;
                 max_p = probabilities[i];
             }
         }
-        
+
         max_i as i32
     }
 
@@ -66,7 +66,7 @@ impl Sampler {
     // Top-p (nucleus) sampling: samples from the smallest set of tokens that exceed probability topp
     fn sample_topp(&mut self, probabilities: &[f32], topp: f32, coin: f32) -> i32 {
         let n = probabilities.len();
-        
+
         // Filter and collect tokens above the cutoff threshold
         let cutoff = (1.0 - topp) / (n - 1) as f32;
         let mut n0 = 0;
@@ -82,7 +82,11 @@ impl Sampler {
 
         // Sort filtered probabilities in descending order
         let probindex = &mut self.probindex[..n0];
-        probindex.sort_unstable_by(|a, b| b.prob.partial_cmp(&a.prob).unwrap_or(std::cmp::Ordering::Equal));
+        probindex.sort_unstable_by(|a, b| {
+            b.prob
+                .partial_cmp(&a.prob)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Find truncation point where cumulative probability exceeds topp
         let mut cumulative_prob = 0.0f32;
@@ -104,14 +108,17 @@ impl Sampler {
                 return probindex[i].index;
             }
         }
-        
+
         probindex[last_idx].index // in case of rounding errors
     }
 
     // xoshiro256** random number generator
     fn random_u64(&mut self) -> u64 {
         let result = self.rng_state.rotate_left(5).wrapping_mul(5).rotate_left(7);
-        self.rng_state = self.rng_state.rotate_left(23).wrapping_add(0x9E3779B97F4A7C15);
+        self.rng_state = self
+            .rng_state
+            .rotate_left(23)
+            .wrapping_add(0x9E3779B97F4A7C15);
         result
     }
 
@@ -173,4 +180,4 @@ impl Ord for ProbIndex {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
     }
-} 
+}
