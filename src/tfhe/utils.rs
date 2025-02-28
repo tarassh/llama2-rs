@@ -28,10 +28,39 @@ fn fixed_inv_sqrt(value: i64) -> i64 {
     (inv_sqrt_f64 * SCALE_FACTOR as f64) as i64
 }
 
+/// Apply softmax normalization in-place using fixed-point `i64`
+pub fn softmax_fixed(x: &mut [i64]) {
+    // Find max value (for numerical stability)
+    let max_val = *x.iter().max().unwrap();
+
+    // Compute exponentials in fixed-point
+    let mut sum: i128 = 0;
+    let mut exp_values: Vec<i64> = vec![0; x.len()];
+    
+    for (i, xi) in x.iter().enumerate() {
+        let shifted_x = xi - max_val; // Scale exponent input
+        exp_values[i] = fixed_exp(shifted_x);
+        sum += exp_values[i] as i128;
+    }
+
+    // Normalize each value
+    for i in 0..x.len() {
+        x[i] = ((exp_values[i] as i128 * SCALE_FACTOR as i128) / sum) as i64;
+    }
+}
+
+/// Approximate `exp(x)` in fixed-point arithmetic
+fn fixed_exp(x: i64) -> i64 {
+    let float_x = x as f64 / SCALE_FACTOR as f64;
+    let exp_f64 = float_x.exp();
+    (exp_f64 * SCALE_FACTOR as f64) as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::utils::rmsnorm;
+    use crate::utils::softmax;
 
     /// Helper function to convert `f32` to `i64` fixed-point.
     fn encode_fixed(value: f32) -> i64 {
@@ -76,6 +105,39 @@ mod tests {
         // Assert values are close within a small tolerance
         let tolerance = 1e-5;
         for (expected, actual) in output_f32.iter().zip(output_fixed_f32.iter()) {
+            assert!(
+                (expected - actual).abs() < tolerance,
+                "Mismatch: expected={}, got={}",
+                expected,
+                actual
+            );
+        }
+    }
+
+    #[test]
+    fn test_softmax_fixed() {
+        let x_f32 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+
+        // Convert `f32` to `i64`
+        let mut x_i64: Vec<i64> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
+
+        // Run fixed-point softmax
+        softmax_fixed(&mut x_i64);
+
+        // Convert back to `f32`
+        let output_f32: Vec<f32> = x_i64.iter().map(|&v| decode_fixed(v)).collect();
+
+        // Compute expected output using floating-point softmax
+        let mut expected_f32 = x_f32.clone();
+        softmax(&mut expected_f32);
+
+        // Print results for debugging
+        println!("Expected (f32): {:?}", expected_f32);
+        println!("Output (Fixed i64 → f32): {:?}", output_f32);
+
+        // Compare results with a small tolerance
+        let tolerance = 1e-5;
+        for (expected, actual) in expected_f32.iter().zip(output_f32.iter()) {
             assert!(
                 (expected - actual).abs() < tolerance,
                 "Mismatch: expected={}, got={}",
