@@ -1,14 +1,14 @@
-use crate::utils::{matmul, rmsnorm};
 use crate::tfhe_utils::EncryptedKeyLUT;
+use crate::utils::{matmul, rmsnorm};
 
-use std::ops::{ Mul, Add };
+use std::ops::{Add, Mul};
 
 use memmap2::Mmap;
 use std::fs::File;
 use std::io::Read;
 use std::{mem, ptr};
 
-use tfhe::{ServerKey, FheInt32, ClientKey, prelude::*};
+use tfhe::{prelude::*, ClientKey, FheInt32};
 
 // Configuration for the transformer architecture
 #[derive(Debug)]
@@ -71,18 +71,30 @@ pub struct TfheTransformerWeights {
 impl TfheTransformerWeights {
     pub fn new(weights: TransformerWeights, client_key: &ClientKey) -> Self {
         let token_embedding_table = EncryptedKeyLUT::new(weights.token_embedding_table, client_key);
+        println!("token embedding table done!");
         let rms_att_weight = EncryptedKeyLUT::new(weights.rms_att_weight, client_key);
+        println!("rms_att_weight done!");
         let rms_ffn_weight = EncryptedKeyLUT::new(weights.rms_ffn_weight, client_key);
+        println!("rms_ffn_weight done!");
         let wq = EncryptedKeyLUT::new(weights.wq, client_key);
+        println!("wq done!");
         let wk = EncryptedKeyLUT::new(weights.wk, client_key);
+        println!("wk done!");
         let wv = EncryptedKeyLUT::new(weights.wv, client_key);
+        println!("wv done!");
         let wo = EncryptedKeyLUT::new(weights.wo, client_key);
+        println!("wo done!");
         let w1 = EncryptedKeyLUT::new(weights.w1, client_key);
+        println!("w1 done!");
         let w2 = EncryptedKeyLUT::new(weights.w2, client_key);
+        println!("w2 done!");
         let w3 = EncryptedKeyLUT::new(weights.w3, client_key);
+        println!("w3 done!");
         let rms_final_weight = EncryptedKeyLUT::new(weights.rms_final_weight, client_key);
+        println!("rms_final_weight done!");
         let wcls = weights.wcls.map(|w| EncryptedKeyLUT::new(w, client_key));
-        
+        println!("wcls done!");
+
         Self {
             token_embedding_table,
             rms_att_weight,
@@ -126,11 +138,13 @@ pub struct TfheTransformer {
     // Memory mapping related fields
     pub file: Option<std::fs::File>, // file handle for memory mapping
     pub mmap: Option<memmap2::Mmap>, // memory mapped data
-    pub server_key: ServerKey, // the server key for the model
 }
 
 impl TfheTransformer {
-    pub fn read_checkpoint(checkpoint_path: &str, client_key: ClientKey, server_key: ServerKey) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn read_checkpoint(
+        checkpoint_path: &str,
+        client_key: ClientKey,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Open the file
         let mut file = File::open(checkpoint_path)?;
 
@@ -166,7 +180,6 @@ impl TfheTransformer {
             state,
             file: Some(file),
             mmap: Some(mmap),
-            server_key,
         })
     }
 
@@ -253,7 +266,11 @@ impl TfheTransformer {
         Ok(weights)
     }
 
-    pub fn forward(&mut self, token: FheInt32, pos: i32) -> Result<&[f32], Box<dyn std::error::Error>> {
+    pub fn forward(
+        &mut self,
+        token: FheInt32,
+        pos: i32,
+    ) -> Result<&[f32], Box<dyn std::error::Error>> {
         let p = &self.config;
         let w = &self.weights;
         let s = &mut self.state;
@@ -269,7 +286,10 @@ impl TfheTransformer {
         let token_start = token.clone().mul(dim as i32);
         let token_end = token.add(FheInt32::encrypt_trivial(1)).mul(dim as i32);
 
-        let content_row = self.t_weights.token_embedding_table.range_lookup(&token_start, &token_end);
+        let content_row = self
+            .t_weights
+            .token_embedding_table
+            .range_lookup(&token_start, &token_end);
         s.x.copy_from_slice(&content_row);
 
         // Forward all the layers
@@ -473,7 +493,7 @@ impl RunState {
         let kv_dim = (config.dim * config.n_kv_heads / config.n_heads) as usize;
         RunState {
             x: vec![0.0; dim],
-            xb: vec![0.0; dim], 
+            xb: vec![0.0; dim],
             xb2: vec![0.0; dim],
             hb: vec![0.0; hidden_dim],
             hb2: vec![0.0; hidden_dim],

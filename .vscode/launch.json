@@ -15,6 +15,18 @@
                 "RUST_LOG": "debug"
             },
             "preLaunchTask": "rust: cargo build"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "tfhe-llama2-rs",
+            "program": "${workspaceFolder}/target/debug/llama2-rs",
+            "args": ["stories42M.bin", "-m", "tfhe", "-t", "0.8", "-n", "256", "-i", "One day, Lily met a Shoggoth"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug"
+            },
+            "preLaunchTask": "rust: cargo build"
         }
     ]
 }

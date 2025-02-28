@@ -1,9 +1,15 @@
 use clap::{Arg, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use tfhe::{generate_keys, ConfigBuilder};
+
 use llama2_rs::model::Transformer;
 use llama2_rs::sampler::Sampler;
 use llama2_rs::tokenizer::Tokenizer;
+
+use llama2_rs::tfhe_model::TfheTransformer;
+use llama2_rs::tfhe_tokenizer::TfheTokenizer;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("run")
         .version("1.0")
@@ -118,20 +124,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Mode: {}", mode);
     println!("System prompt: {}", system_prompt);
 
-    // Load the model
-    let mut transformer = Transformer::read_checkpoint(checkpoint)?;
-    if steps == 0 || steps > transformer.config.seq_len {
-        steps = transformer.config.seq_len;
-    }
-
-    // Load the tokenizer
-    let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, transformer.config.vocab_size)?;
-
-    // Load the sampler
-    let mut sampler = Sampler::new(transformer.config.vocab_size, temperature, p_value, seed);
-
     match mode {
         "generate" => {
+            // Load the model
+            let mut transformer = Transformer::read_checkpoint(checkpoint)?;
+            if steps == 0 || steps > transformer.config.seq_len {
+                steps = transformer.config.seq_len;
+            }
+
+            // Load the tokenizer
+            let mut tokenizer =
+                Tokenizer::build_tokenizer(tokenizer, transformer.config.vocab_size)?;
+
+            // Load the sampler
+            let mut sampler =
+                Sampler::new(transformer.config.vocab_size, temperature, p_value, seed);
+
             llama2_rs::generate(
                 &mut transformer,
                 &mut tokenizer,
@@ -139,7 +147,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 input_prompt,
                 steps,
             )?;
-        }
+        },
+        "tfhe" => {
+            let (client_key, server_key) = generate_keys(ConfigBuilder::default());
+
+            // Load the model
+            let mut transformer = TfheTransformer::read_checkpoint(checkpoint, client_key.clone())?;
+
+            // Load the tokenizer
+            let mut tokenizer = TfheTokenizer::build_tokenizer(tokenizer, transformer.config.vocab_size, client_key)?;
+
+            // Load the sampler
+            let mut sampler = Sampler::new(transformer.config.vocab_size, temperature, p_value, seed);
+
+            llama2_rs::tfhe_generate(
+                &mut transformer,
+                &mut tokenizer,
+                &mut sampler,
+                input_prompt,
+                steps,
+                server_key,
+            )?;
+        },
         _ => {
             println!("Invalid mode: {}", mode);
             return Err("Invalid mode".into());

@@ -1,6 +1,6 @@
+use std::ops::Add;
 use tfhe::prelude::*;
 use tfhe::{ClientKey, FheInt32};
-use std::ops::Add;
 
 #[derive(Clone)]
 pub struct EncryptedKeyLUT {
@@ -22,7 +22,8 @@ impl EncryptedKeyLUT {
             .zip(self.values.iter())
             .map(|(lut_key, lut_value)| {
                 let condition = encrypted_key.eq(lut_key);
-                let condition_as_int = condition.cmux(&FheInt32::encrypt_trivial(1), &FheInt32::encrypt_trivial(0));
+                let condition_as_int =
+                    condition.cmux(&FheInt32::encrypt_trivial(1), &FheInt32::encrypt_trivial(0));
                 condition_as_int.try_decrypt_trivial::<i32>().unwrap() as f32 * lut_value
             }) // Select matching value
             .reduce(|acc, val| acc + val) // Sum ensures only the selected value is nonzero
@@ -34,7 +35,9 @@ impl EncryptedKeyLUT {
         let end = encrypted_m.clone();
         let mut results = vec![];
         loop {
-            let is_end = start.eq(end.clone()).cmux(&FheInt32::encrypt_trivial(1), &FheInt32::encrypt_trivial(0));
+            let is_end = start
+                .eq(end.clone())
+                .cmux(&FheInt32::encrypt_trivial(1), &FheInt32::encrypt_trivial(0));
             let is_end_decrypted = is_end.try_decrypt_trivial::<i32>().unwrap();
             if is_end_decrypted == 1 {
                 break;
