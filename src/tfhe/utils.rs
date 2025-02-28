@@ -18,15 +18,34 @@ pub fn rmsnorm_fixed(o: &mut [i64], x: &[i64], weight: &[i64], size: usize) {
 
     // Step 3: Normalize and scale
     for j in 0..size {
-        o[j] = ((weight[j] as i128 * scale as i128 * x[j] as i128) / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128)) as i64;
+        o[j] = ((weight[j] as i128 * scale as i128 * x[j] as i128) / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128 * 2)) as i64;
     }
 }
 
-/// Compute inverse square root in fixed-point arithmetic
+/// Compute `1 / sqrt(value)` in fixed-point (`i64`) using Newton-Raphson.
+/// Assumes `value` is in fixed-point format (`SCALE_FACTOR` precision).
 fn fixed_inv_sqrt(value: i64) -> i64 {
-    let float_value = value as f64 / SCALE_FACTOR as f64;
-    let inv_sqrt_f64 = 1.0 / float_value.sqrt();
-    (inv_sqrt_f64 * SCALE_FACTOR as f64) as i64
+    debug_assert!(value > 0, "Input must be positive");
+
+    let mut x = SCALE_FACTOR; // Initial guess (1.0 in fixed-point)
+    let mut v = value;
+
+    // Normalize `v` to prevent overflow in large numbers
+    while v > SCALE_FACTOR * 10 {
+        v /= 4;
+        x /= 2;
+    }
+    while v < SCALE_FACTOR / 10 {
+        v *= 4;
+        x *= 2;
+    }
+
+    // Perform Newton-Raphson iterations
+    for _ in 0..3 {
+        x = (x * (3 * SCALE_FACTOR - ((v * x / SCALE_FACTOR) * x / SCALE_FACTOR)) / 2) / SCALE_FACTOR;
+    }
+
+    x
 }
 
 /// Apply softmax normalization in-place using fixed-point `i64`
