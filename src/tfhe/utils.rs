@@ -59,7 +59,7 @@ pub fn softmax_fixed(x: &mut [i64]) {
     
     for (i, xi) in x.iter().enumerate() {
         let shifted_x = xi - max_val; // Scale exponent input
-        exp_values[i] = fixed_exp(shifted_x);
+        exp_values[i] = exp_fixed(shifted_x);
         sum += exp_values[i] as i128;
     }
 
@@ -67,13 +67,6 @@ pub fn softmax_fixed(x: &mut [i64]) {
     for i in 0..x.len() {
         x[i] = ((exp_values[i] as i128 * SCALE_FACTOR as i128) / sum) as i64;
     }
-}
-
-/// Approximate `exp(x)` in fixed-point arithmetic
-fn fixed_exp(x: i64) -> i64 {
-    let float_x = x as f64 / SCALE_FACTOR as f64;
-    let exp_f64 = float_x.exp();
-    (exp_f64 * SCALE_FACTOR as f64) as i64
 }
 
 /// Fixed-Point Matrix multiplication: W (d,n) @ x (n,) -> xout (d,)
@@ -116,6 +109,65 @@ pub fn matmul_fixed(xout: &mut [i64], x: &[i64], w: &[i64], n: usize, d: usize) 
     }
 }
 
+// Precomputed powers of `e` for small integers
+const E_POWERS: [i64; 10] = [
+    1_000_000_000,  // e^0  = 1.0
+    2_718_281_828,  // e^1  = 2.718...
+    7_389_056_099,  // e^2  = 7.389...
+    20_085_536_923, // e^3  = 20.085...
+    54_598_150_033, // e^4  = 54.598...
+    148_413_159_103, // e^5  = 148.413...
+    403_428_793_492, // e^6  = 403.428...
+    1_096_633_158_428, // e^7
+    2_980_957_987_041, // e^8
+    8_103_083_927_576, // e^9
+];
+
+// Compute exp(x) in fixed-point arithmetic using Taylor series
+fn exp_fixed(x: i64) -> i64 {
+    if x == 0 {
+        return SCALE_FACTOR; // e^0 = 1
+    }
+
+    let int_part = (x / SCALE_FACTOR) as i32; // Integer part of x
+    let frac_part = x % SCALE_FACTOR;         // Fractional part of x
+
+    let mut result; // Declare result without initial assignment
+
+    // If the integer part is small, use precomputed values
+    if int_part >= 0 && (int_part as usize) < E_POWERS.len() {
+        result = E_POWERS[int_part as usize];
+    } else {
+        // For larger int_part, use exponentiation by squaring
+        let mut base = 2_718_281_828; // e^1
+        let mut exp = int_part.abs();
+        let mut value = SCALE_FACTOR; // 1.0 in fixed-point
+
+        while exp > 0 {
+            if exp % 2 == 1 {
+                value = (value as i128 * base as i128 / SCALE_FACTOR as i128) as i64;
+            }
+            base = (base as i128 * base as i128 / SCALE_FACTOR as i128) as i64;
+            exp /= 2;
+        }
+
+        result = if int_part > 0 { value } else { SCALE_FACTOR * SCALE_FACTOR / value };
+    }
+
+    // Compute `e^frac(x)` using a polynomial (Taylor series)
+    let mut term = SCALE_FACTOR; // First term is 1
+    let numerator = frac_part;
+    let mut denominator = SCALE_FACTOR;
+
+    for i in 1..8 { // Higher terms improve accuracy
+        term = (term as i128 * numerator as i128 / SCALE_FACTOR as i128) as i64;
+        denominator = (denominator as i128 * i as i128) as i64;
+        result = ((result as i128 * SCALE_FACTOR as i128) / SCALE_FACTOR as i128 * (SCALE_FACTOR as i128 + term as i128 / denominator as i128) / SCALE_FACTOR as i128) as i64;
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +183,38 @@ mod tests {
     /// Helper function to convert `i64` fixed-point back to `f32`.
     fn decode_fixed(value: i64) -> f32 {
         value as f32 / SCALE_FACTOR as f32
+    }
+
+    #[test]
+    fn test_fixed_exp() {
+        let test_cases = vec![
+            -2.0,  // e^(-2)
+            -1.0,  // e^(-1)
+            0.0,   // e^0 = 1
+            0.5,   // e^(0.5)
+            1.0,   // e^1 = 2.718...
+            2.0,   // e^2 = 7.389...
+            3.0,   // e^3
+            5.0,   // e^5
+            -0.5,  // e^(-0.5)
+        ];
+
+        for &x in &test_cases {
+            let x_fixed = encode_fixed(x);
+            let exp_fixed = exp_fixed(x_fixed);
+            let result = decode_fixed(exp_fixed);
+            let expected = x.exp(); // Rust's built-in exp function
+
+            let error = (result - expected).abs();
+            let tolerance = 0.0001; // Allow a small error
+
+            println!(
+                "Testing e^{:.3}: Expected = {:.9}, Got = {:.9}, Error = {:.9}",
+                x, expected, result, error
+            );
+
+            assert!(error < tolerance, "Mismatch in fixed_exp for e^{:.3}", x);
+        }
     }
 
     #[test]
@@ -248,4 +332,5 @@ mod tests {
             );
         }
     }
+
 }
