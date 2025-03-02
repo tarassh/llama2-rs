@@ -129,6 +129,11 @@ fn exp_fixed(x: i64) -> i64 {
         return SCALE_FACTOR; // e^0 = 1
     }
 
+    // If x is in the range [-1,1], use Chebyshev polynomial approximation
+    if -SCALE_FACTOR < x && x < SCALE_FACTOR {
+        return fixed_exp_chebyshev(x);
+    }
+
     let int_part = (x / SCALE_FACTOR) as i32; // Integer part of x
     let frac_part = x % SCALE_FACTOR;         // Fractional part of x
 
@@ -159,11 +164,42 @@ fn exp_fixed(x: i64) -> i64 {
     let numerator = frac_part;
     let mut denominator = SCALE_FACTOR;
 
-    for i in 1..8 { // Higher terms improve accuracy
+    for i in 1..10 { // Higher terms improve accuracy
         term = (term as i128 * numerator as i128 / SCALE_FACTOR as i128) as i64;
         denominator = (denominator as i128 * i as i128) as i64;
         result = ((result as i128 * SCALE_FACTOR as i128) / SCALE_FACTOR as i128 * (SCALE_FACTOR as i128 + term as i128 / denominator as i128) / SCALE_FACTOR as i128) as i64;
     }
+
+    result
+}
+
+// Chebyshev coefficients for exp(x) on [-1,1]
+const C0: i64 = 1_000_000_000;
+const C1: i64 = 1_000_000_000;
+const C2: i64 = 500_000_000;
+const C3: i64 = 166_666_667;
+const C4: i64 = 41_666_667;
+const C5: i64 = 8_333_333;
+const C6: i64 = 1_388_888;
+const C7: i64 = 198_412;
+
+// Chebyshev approximation for e^x when x ∈ [-1,1]
+fn fixed_exp_chebyshev(x: i64) -> i64 {
+    let x2 = (x as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+    let x3 = (x2 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+    let x4 = (x3 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+    let x5 = (x4 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+    let x6 = (x5 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+    let x7 = (x6 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+
+    let result = C0
+        + (C1 * x) / SCALE_FACTOR
+        + (C2 * x2) / SCALE_FACTOR
+        + (C3 * x3) / SCALE_FACTOR
+        + (C4 * x4) / SCALE_FACTOR
+        + (C5 * x5) / SCALE_FACTOR
+        + (C6 * x6) / SCALE_FACTOR
+        + (C7 * x7) / SCALE_FACTOR;
 
     result
 }
@@ -197,6 +233,11 @@ mod tests {
             3.0,   // e^3
             5.0,   // e^5
             -0.5,  // e^(-0.5)
+            0.25,  // e^(0.25)
+            0.75,  // e^(0.75)
+            0.01,  // e^(0.01)
+            0.1,   // e^(0.1)
+            0.001, // e^(0.001)
         ];
 
         for &x in &test_cases {
