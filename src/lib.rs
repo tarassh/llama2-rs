@@ -5,9 +5,9 @@ use tokenizer::Tokenizer;
 
 pub mod model;
 pub mod sampler;
+pub mod tfhe;
 pub mod tokenizer;
 pub mod utils;
-pub mod tfhe;
 
 /// Returns the current time in milliseconds since the Unix epoch
 pub fn time_in_ms() -> u128 {

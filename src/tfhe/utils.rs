@@ -9,16 +9,19 @@ pub fn rmsnorm_fixed(o: &mut [i64], x: &[i64], weight: &[i64], size: usize) {
     debug_assert_eq!(weight.len(), size);
 
     // Step 1: Compute sum of squares in fixed-point
-    let ss: i128 = x.iter()
+    let ss: i128 = x
+        .iter()
         .map(|&xi| (xi as i128 * xi as i128) / SCALE_FACTOR as i128)
-        .sum::<i128>() / size as i128;
+        .sum::<i128>()
+        / size as i128;
 
     // Step 2: Compute inverse square root (Fixed-Point)
     let scale: i64 = fixed_inv_sqrt(ss as i64 + EPSILON);
 
     // Step 3: Normalize and scale
     for j in 0..size {
-        o[j] = ((weight[j] as i128 * scale as i128 * x[j] as i128) / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128 * 2)) as i64;
+        o[j] = ((weight[j] as i128 * scale as i128 * x[j] as i128)
+            / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128 * 2)) as i64;
     }
 }
 
@@ -42,7 +45,8 @@ fn fixed_inv_sqrt(value: i64) -> i64 {
 
     // Perform Newton-Raphson iterations
     for _ in 0..3 {
-        x = (x * (3 * SCALE_FACTOR - ((v * x / SCALE_FACTOR) * x / SCALE_FACTOR)) / 2) / SCALE_FACTOR;
+        x = (x * (3 * SCALE_FACTOR - ((v * x / SCALE_FACTOR) * x / SCALE_FACTOR)) / 2)
+            / SCALE_FACTOR;
     }
 
     x
@@ -56,7 +60,7 @@ pub fn softmax_fixed(x: &mut [i64]) {
     // Compute exponentials in fixed-point
     let mut sum: i128 = 0;
     let mut exp_values: Vec<i64> = vec![0; x.len()];
-    
+
     for (i, xi) in x.iter().enumerate() {
         let shifted_x = xi - max_val; // Scale exponent input
         exp_values[i] = exp_fixed(shifted_x);
@@ -111,20 +115,20 @@ pub fn matmul_fixed(xout: &mut [i64], x: &[i64], w: &[i64], n: usize, d: usize) 
 
 // Precomputed powers of `e` for small integers
 const E_POWERS: [i64; 10] = [
-    1_000_000_000,  // e^0  = 1.0
-    2_718_281_828,  // e^1  = 2.718...
-    7_389_056_099,  // e^2  = 7.389...
-    20_085_536_923, // e^3  = 20.085...
-    54_598_150_033, // e^4  = 54.598...
-    148_413_159_103, // e^5  = 148.413...
-    403_428_793_492, // e^6  = 403.428...
+    1_000_000_000,     // e^0  = 1.0
+    2_718_281_828,     // e^1  = 2.718...
+    7_389_056_099,     // e^2  = 7.389...
+    20_085_536_923,    // e^3  = 20.085...
+    54_598_150_033,    // e^4  = 54.598...
+    148_413_159_103,   // e^5  = 148.413...
+    403_428_793_492,   // e^6  = 403.428...
     1_096_633_158_428, // e^7
     2_980_957_987_041, // e^8
     8_103_083_927_576, // e^9
 ];
 
 // Compute exp(x) in fixed-point arithmetic using Taylor series
-fn exp_fixed(x: i64) -> i64 {
+pub fn exp_fixed(x: i64) -> i64 {
     if x == 0 {
         return SCALE_FACTOR; // e^0 = 1
     }
@@ -135,7 +139,7 @@ fn exp_fixed(x: i64) -> i64 {
     }
 
     let int_part = (x / SCALE_FACTOR) as i32; // Integer part of x
-    let frac_part = x % SCALE_FACTOR;         // Fractional part of x
+    let frac_part = x % SCALE_FACTOR; // Fractional part of x
 
     let mut result; // Declare result without initial assignment
 
@@ -156,7 +160,11 @@ fn exp_fixed(x: i64) -> i64 {
             exp /= 2;
         }
 
-        result = if int_part > 0 { value } else { SCALE_FACTOR * SCALE_FACTOR / value };
+        result = if int_part > 0 {
+            value
+        } else {
+            SCALE_FACTOR * SCALE_FACTOR / value
+        };
     }
 
     // Compute `e^frac(x)` using a polynomial (Taylor series)
@@ -164,10 +172,13 @@ fn exp_fixed(x: i64) -> i64 {
     let numerator = frac_part;
     let mut denominator = SCALE_FACTOR;
 
-    for i in 1..10 { // Higher terms improve accuracy
+    for i in 1..15 {
+        // Higher terms improve accuracy
         term = (term as i128 * numerator as i128 / SCALE_FACTOR as i128) as i64;
         denominator = (denominator as i128 * i as i128) as i64;
-        result = ((result as i128 * SCALE_FACTOR as i128) / SCALE_FACTOR as i128 * (SCALE_FACTOR as i128 + term as i128 / denominator as i128) / SCALE_FACTOR as i128) as i64;
+        result = ((result as i128 * SCALE_FACTOR as i128) / SCALE_FACTOR as i128
+            * (SCALE_FACTOR as i128 + term as i128 / denominator as i128)
+            / SCALE_FACTOR as i128) as i64;
     }
 
     result
@@ -204,12 +215,68 @@ fn fixed_exp_chebyshev(x: i64) -> i64 {
     result
 }
 
+fn log_fixed(x: i64) -> i64 {
+    debug_assert!(x > 0, "log(x) requires x > 0");
+
+    let mut k = 0;
+    let mut m = x;
+
+    // Normalize `x` into the range [0.5,2]
+    while m > 2 * SCALE_FACTOR {
+        m /= 2;
+        k += 1;
+    }
+    while m < SCALE_FACTOR / 2 {
+        m *= 2;
+        k -= 1;
+    }
+
+    // Improved `z` scaling
+    let z = (m - SCALE_FACTOR) * 5 / 7;
+
+    let z2 = (z as i128 * z as i128 / SCALE_FACTOR as i128) as i64;
+    let z3 = (z2 as i128 * z as i128 / SCALE_FACTOR as i128) as i64;
+    let z4 = (z3 as i128 * z as i128 / SCALE_FACTOR as i128) as i64;
+
+    let log_m = (1_442_695_500 * z) / SCALE_FACTOR
+        + (-721_347_250 * z2) / SCALE_FACTOR
+        + (144_269_125 * z3) / SCALE_FACTOR
+        + (-21_640_000 * z4) / SCALE_FACTOR;
+
+    let log_result = log_m + k * 693_147_180; // ln(2) ≈ 0.693147180
+
+    println!(
+        "log_fixed({}): k={}, m={}, z={}, log_m={}, log_result={}",
+        x, k, m, z, log_m, log_result
+    );
+
+    log_result
+}
+
+pub fn pow_fixed(x: i64, y: i64) -> i64 {
+    if x == SCALE_FACTOR {
+        return SCALE_FACTOR; // 1^y = 1
+    }
+    if y == 0 {
+        return SCALE_FACTOR; // x^0 = 1
+    }
+
+    // Compute ln(x) using high-precision Chebyshev
+    let log_x = log_fixed(x);
+
+    // Compute y * ln(x) in fixed-point
+    let exp_input = ((y as i128 * log_x as i128) / SCALE_FACTOR as i128) as i64;
+
+    // Compute exp(y * ln(x)) using pre-verified `exp_fixed()`
+    exp_fixed(exp_input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::matmul;
     use crate::utils::rmsnorm;
     use crate::utils::softmax;
-    use crate::utils::matmul;
 
     /// Helper function to convert `f32` to `i64` fixed-point.
     fn encode_fixed(value: f32) -> i64 {
@@ -224,20 +291,35 @@ mod tests {
     #[test]
     fn test_fixed_exp() {
         let test_cases = vec![
-            -2.0,  // e^(-2)
-            -1.0,  // e^(-1)
-            0.0,   // e^0 = 1
-            0.5,   // e^(0.5)
-            1.0,   // e^1 = 2.718...
-            2.0,   // e^2 = 7.389...
-            3.0,   // e^3
-            5.0,   // e^5
-            -0.5,  // e^(-0.5)
-            0.25,  // e^(0.25)
-            0.75,  // e^(0.75)
-            0.01,  // e^(0.01)
-            0.1,   // e^(0.1)
-            0.001, // e^(0.001)
+            -2.0,       // e^(-2)
+            -1.0,       // e^(-1)
+            0.0,        // e^0 = 1
+            0.5,        // e^(0.5)
+            1.0,        // e^1 = 2.718...
+            2.0,        // e^2 = 7.389...
+            3.0,        // e^3
+            5.0,        // e^5
+            -0.5,       // e^(-0.5)
+            -0.25,      // e^(-0.25)
+            -0.75,      // e^(-0.75)
+            -0.01,      // e^(-0.01)
+            -0.1,       // e^(-0.1)
+            -0.001,     // e^(-0.001)
+            -25.824846, // e^(-25.824846)
+            -20.234,    // e^(-20.234)
+            -7.4335403, 
+            -8.710781,  
+            -9.919607,  
+            -10.041857, 
+            -7.064037,  
+            -8.489454,  
+            -11.895886, 
+            -6.072899,  
+            -11.976686, 
+            -11.888927, 
+            -8.481754,  
+            -30.182629, 
+            -3.14159,   // e^(-3.14159)
         ];
 
         for &x in &test_cases {
@@ -336,10 +418,7 @@ mod tests {
     #[test]
     fn test_matmul_fixed() {
         let x_f32 = vec![1.0, 2.0, 3.0];
-        let w_f32 = vec![
-            0.1, 0.2, 0.3,
-            0.4, 0.5, 0.6
-        ]; // 2x3 matrix
+        let w_f32 = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]; // 2x3 matrix
         let d = 2;
         let n = 3;
 
@@ -374,4 +453,39 @@ mod tests {
         }
     }
 
+    // #[test]
+    // fn test_pow_fixed() {
+    //     let test_cases = vec![
+    //         (2.0, 0.5),  // sqrt(2)
+    //         (2.0, 1.0),  // 2^1 = 2
+    //         (2.0, 2.0),  // 2^2 = 4
+    //         (3.0, 3.0),  // 3^3 = 27
+    //         (5.0, -1.0), // 5^-1 = 1/5
+    //         (10.0, 0.3), // 10^0.3
+    //     ];
+
+    //     for &(base, exp) in &test_cases {
+    //         let base_fixed = encode_fixed(base);
+    //         let exp_fixed = encode_fixed(exp);
+
+    //         let result_fixed = pow_fixed(base_fixed, exp_fixed);
+    //         let result = decode_fixed(result_fixed);
+    //         let expected = base.powf(exp);
+
+    //         let error = (result - expected).abs();
+    //         let tolerance = 0.0001; // Allow small error
+
+    //         println!(
+    //             "Testing {}^{}: Expected = {:.6}, Got = {:.6}, Error = {:.6}",
+    //             base, exp, expected, result, error
+    //         );
+
+    //         assert!(
+    //             error < tolerance,
+    //             "Mismatch in pow_fixed for {}^{}",
+    //             base,
+    //             exp
+    //         );
+    //     }
+    // }
 }

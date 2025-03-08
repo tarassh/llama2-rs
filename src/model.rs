@@ -1,4 +1,4 @@
-use crate::utils::{matmul, rmsnorm};
+use crate::utils::{matmul, rmsnorm, softmax};
 use memmap2::Mmap;
 use std::fs::File;
 use std::io::Read;
@@ -291,7 +291,7 @@ impl Transformer {
 
                 // Softmax the scores
                 let att_slice = &mut att[0..=pos as usize];
-                crate::utils::softmax(att_slice);
+                softmax(att_slice);
 
                 // Weighted sum of the values
                 xb.fill(0.0);
