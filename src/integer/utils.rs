@@ -3,6 +3,16 @@ use rayon::prelude::*;
 const SCALE_FACTOR: i64 = 1_000_000_000; // 10^9 for 9 decimal places
 const EPSILON: i64 = 10_000; // Equivalent to 1e-5 in fixed-point
 
+/// Helper function to convert `f32` to `i64` fixed-point.
+pub fn encode_fixed(value: f32) -> i64 {
+    (value * SCALE_FACTOR as f32) as i64
+}
+
+/// Helper function to convert `i64` fixed-point back to `f32`.
+pub fn decode_fixed(value: i64) -> f32 {
+    value as f32 / SCALE_FACTOR as f32
+}
+
 pub fn rmsnorm_fixed(o: &mut [i64], x: &[i64], weight: &[i64], size: usize) {
     debug_assert_eq!(o.len(), size);
     debug_assert_eq!(x.len(), size);
@@ -202,16 +212,6 @@ mod tests {
     use crate::utils::matmul;
     use crate::utils::rmsnorm;
     use crate::utils::softmax;
-
-    /// Helper function to convert `f32` to `i64` fixed-point.
-    fn encode_fixed(value: f32) -> i64 {
-        (value * SCALE_FACTOR as f32) as i64
-    }
-
-    /// Helper function to convert `i64` fixed-point back to `f32`.
-    fn decode_fixed(value: i64) -> f32 {
-        value as f32 / SCALE_FACTOR as f32
-    }
 
     #[test]
     fn test_fixed_exp() {

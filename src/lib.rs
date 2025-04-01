@@ -5,7 +5,7 @@ use tokenizer::Tokenizer;
 
 pub mod model;
 pub mod sampler;
-pub mod tfhe;
+pub mod integer;
 pub mod tokenizer;
 pub mod utils;
 
