@@ -288,8 +288,8 @@ impl Transformer {
                     };
                     let v0 = vec[i];
                     let v1 = vec[i + 1];
-                    vec[i] = v0 * fcr - v1 * fci;
-                    vec[i + 1] = v0 * fci + v1 * fcr;
+                    vec[i] = v0.mult(fcr) - v1.mult(fci);
+                    vec[i + 1] = v0.mult(fci) + v1.mult(fcr);
                 }
             }
 
@@ -311,11 +311,14 @@ impl Transformer {
                     let score = q
                         .iter()
                         .zip(k.iter())
-                        .map(|(&qi, &ki)| qi * ki)
-                        .sum::<FixedPoint>()
-                        / head_size_sqrt;
+                        .map(|(&qi, &ki)| {
+                            // qi * ki
+                            qi.mult(ki) as i128
+                        })
+                        .sum::<i128>()
+                        / head_size_sqrt as i128;
 
-                    att[t] = score;
+                    att[t] = score as FixedPoint;
                 }
 
                 // Softmax the scores
@@ -333,7 +336,7 @@ impl Transformer {
 
                     // Accumulate weighted value
                     for i in 0..head_size {
-                        xb[i] += a * v[i];
+                        xb[i] += a.mult(v[i]);
                     }
                 }
             }

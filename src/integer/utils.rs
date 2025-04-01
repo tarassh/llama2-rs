@@ -10,6 +10,7 @@ pub const ONE: FixedPoint = SCALE_FACTOR; // 1.0 in fixed-point
 pub trait FixedPointExt {
     fn one() -> Self;
     fn normalize(n: usize) -> Self;
+    fn mult(self, other: Self) -> Self;
 }
 
 impl FixedPointExt for FixedPoint {
@@ -19,6 +20,17 @@ impl FixedPointExt for FixedPoint {
 
     fn normalize(n: usize) -> Self {
         (n as FixedPoint * SCALE_FACTOR) as Self
+    }
+
+    fn mult(self, other: Self) -> Self {
+        if self == Self::one() {
+            return other;
+        }
+        if other == Self::one() {
+            return self;
+        }
+
+        (self as i128 * other as i128 / SCALE_FACTOR as i128) as Self
     }
 }
 
