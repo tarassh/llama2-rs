@@ -1,5 +1,5 @@
 use super::utils;
-use super::utils::FixedPoint;
+use super::utils::{FixedPoint, FixedPointExt};
 use memmap2::Mmap;
 use std::fs::File;
 use std::io::Read;
@@ -217,6 +217,207 @@ impl Transformer {
         };
 
         Ok(weights)
+    }
+
+    pub fn forward(&mut self, token: i32, pos: i32) -> Result<&[FixedPoint], Box<dyn std::error::Error>> {
+        let p = &self.config;
+        let w = &self.weights;
+        let s = &mut self.state;
+        let dim = p.dim as usize;
+        let kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        let kv_mul = p.n_heads / p.n_kv_heads; // integer multiplier of the kv sharing in multiquery
+        let hidden_dim = p.hidden_dim as usize;
+        let head_size = dim / p.n_heads as usize;
+        let head_size_sqrt = utils::encode_fixed((head_size as f32).sqrt());
+
+        // Copy the token embedding into x
+        let content_row =
+            &w.token_embedding_table[token as usize * dim..(token as usize + 1) * dim];
+        s.x.copy_from_slice(content_row);
+
+        // Forward all the layers
+        for l in 0..p.n_layers as usize {
+            // Attention rmsnorm
+            utils::rmsnorm_fixed(
+                &mut s.xb,
+                &s.x,
+                &w.rms_att_weight[l * dim..(l + 1) * dim],
+                dim,
+            );
+
+            // Key and value point to the kv cache
+            let loff = l * p.seq_len as usize * kv_dim as usize; // kv cache layer offset
+            let pos_offset = loff + pos as usize * kv_dim as usize;
+
+            // QKV matmuls for this position
+            utils::matmul_fixed(
+                &mut s.q,
+                &s.xb,
+                &w.wq[l * dim * dim..(l + 1) * dim * dim],
+                dim,
+                dim,
+            );
+
+            // Write directly into the key and value caches
+            utils::matmul_fixed(
+                &mut s.key_cache[pos_offset..pos_offset + kv_dim as usize],
+                &s.xb,
+                &w.wk[l * dim * kv_dim as usize..(l + 1) * dim * kv_dim as usize],
+                dim,
+                kv_dim as usize,
+            );
+            utils::matmul_fixed(
+                &mut s.value_cache[pos_offset..pos_offset + kv_dim as usize],
+                &s.xb,
+                &w.wv[l * dim * kv_dim as usize..(l + 1) * dim * kv_dim as usize],
+                dim,
+                kv_dim as usize,
+            );
+
+            // RoPE relative positional encoding
+            for (j, i) in (0..dim).step_by(2).enumerate() {
+                let rotn = if i < kv_dim as usize { 2 } else { 1 }; // how many vectors? 2 = q & k, 1 = q only
+
+                let (fcr, fci) = self.rope_freqs[pos as usize][j];
+
+                for v in 0..rotn {
+                    let vec = if v == 0 {
+                        &mut s.q
+                    } else {
+                        &mut s.key_cache[pos_offset..pos_offset + kv_dim as usize]
+                    };
+                    let v0 = vec[i];
+                    let v1 = vec[i + 1];
+                    vec[i] = v0 * fcr - v1 * fci;
+                    vec[i + 1] = v0 * fci + v1 * fcr;
+                }
+            }
+
+            // Multihead attention
+            for h in 0..p.n_heads as usize {
+                // Get the query vector for this head
+                let q_start = h * head_size;
+                let q = &s.q[q_start..q_start + head_size];
+                let att = &mut s.att[h * p.seq_len as usize..];
+                let xb = &mut s.xb[h * head_size..(h + 1) * head_size];
+
+                // Calculate attention scores
+                for t in 0..=pos as usize {
+                    // Get the key vector for this head and timestep
+                    let k_start = loff + t * kv_dim as usize + (h / kv_mul as usize) * head_size;
+                    let k = &s.key_cache[k_start..k_start + head_size];
+
+                    // Calculate attention score as dot product of q and k
+                    let score = q
+                        .iter()
+                        .zip(k.iter())
+                        .map(|(&qi, &ki)| qi * ki)
+                        .sum::<FixedPoint>()
+                        / head_size_sqrt;
+
+                    att[t] = score;
+                }
+
+                // Softmax the scores
+                let att_slice = &mut att[0..=pos as usize];
+                utils::softmax_fixed(att_slice);
+
+                // Weighted sum of the values
+                xb.fill(0);
+
+                for t in 0..=pos as usize {
+                    // Get the value vector for this head and timestep
+                    let v_start = loff + t * kv_dim as usize + (h / kv_mul as usize) * head_size;
+                    let v = &s.value_cache[v_start..v_start + head_size];
+                    let a = att[t];
+
+                    // Accumulate weighted value
+                    for i in 0..head_size {
+                        xb[i] += a * v[i];
+                    }
+                }
+            }
+
+            // Final matmul to get the output of the attention
+            utils::matmul_fixed(
+                &mut s.xb2,
+                &s.xb,
+                &w.wo[l * dim * dim..(l + 1) * dim * dim],
+                dim,
+                dim,
+            );
+
+            // Residual connection back into x
+            for i in 0..dim {
+                s.x[i] += s.xb2[i];
+            }
+
+            // FFN rmsnorm
+            utils::rmsnorm_fixed(
+                &mut s.xb,
+                &s.x,
+                &w.rms_ffn_weight[l * dim..(l + 1) * dim],
+                dim,
+            );
+
+            // Calculate self.w1(x) and self.w3(x)
+            utils::matmul_fixed(
+                &mut s.hb,
+                &s.xb,
+                &w.w1[l * dim * hidden_dim..(l + 1) * dim * hidden_dim],
+                dim,
+                hidden_dim,
+            );
+            utils::matmul_fixed(
+                &mut s.hb2,
+                &s.xb,
+                &w.w3[l * dim * hidden_dim..(l + 1) * dim * hidden_dim],
+                dim,
+                hidden_dim,
+            );
+
+            // SwiGLU non-linearity
+            for i in 0..hidden_dim {
+                let val = s.hb[i];
+                // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+                s.hb[i] = val * (FixedPoint::one() / (FixedPoint::one() + utils::exp_fixed(-val))) * s.hb2[i];
+            }
+
+            // Final matmul to get the output of the ffn
+            utils::matmul_fixed(
+                &mut s.xb,
+                &s.hb,
+                &w.w2[l * hidden_dim * dim..(l + 1) * hidden_dim * dim],
+                hidden_dim,
+                dim,
+            );
+
+            // Residual connection
+            for i in 0..dim {
+                s.x[i] += s.xb[i];
+            }
+        }
+
+        // Final rmsnorm
+        let mut x_copy = s.x.clone();
+        utils::rmsnorm_fixed(&mut x_copy, &s.x, &w.rms_final_weight, dim);
+        s.x.copy_from_slice(&x_copy);
+
+        // Classifier into logits
+        if let Some(wcls) = &w.wcls {
+            utils::matmul_fixed(&mut s.logits, &s.x, wcls, dim, p.vocab_size as usize);
+        } else {
+            // If no classifier weights, use token embedding weights
+            utils::matmul_fixed(
+                &mut s.logits,
+                &s.x,
+                &w.token_embedding_table,
+                dim,
+                p.vocab_size as usize,
+            );
+        }
+
+        Ok(&self.state.logits)
     }
 }
 
