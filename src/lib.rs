@@ -1,12 +1,12 @@
-use model::Transformer;
 use sampler::Sampler;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokenizer::Tokenizer;
+use transformer::Transformer;
 
 pub mod integer;
-pub mod model;
 pub mod sampler;
 pub mod tokenizer;
+pub mod transformer;
 pub mod utils;
 
 /// Returns the current time in milliseconds since the Unix epoch

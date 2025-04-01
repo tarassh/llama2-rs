@@ -1,7 +1,7 @@
 use clap::{Arg, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use llama2_rs::model::Transformer;
+use llama2_rs::transformer::Transformer;
 use llama2_rs::sampler::Sampler;
 use llama2_rs::tokenizer::Tokenizer;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
