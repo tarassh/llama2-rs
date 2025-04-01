@@ -5,7 +5,7 @@ use std::io::Read;
 use std::{mem, ptr};
 
 // Configuration for the transformer architecture
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     pub dim: i32,        // transformer dimension
     pub hidden_dim: i32, // for ffn layers
@@ -65,6 +65,8 @@ pub struct Transformer {
     // Memory mapping related fields
     pub file: Option<std::fs::File>, // file handle for memory mapping
     pub mmap: Option<memmap2::Mmap>, // memory mapped data
+
+    pub rope_freqs: Vec<Vec<(f32, f32)>>, // [seq_len][dim/2]
 }
 
 impl Transformer {
@@ -96,13 +98,41 @@ impl Transformer {
         // Create run state buffers
         let state = RunState::new(&config);
 
+        let rope_freqs = Self::precompute_rope_freqs(&config);
+
         Ok(Transformer {
-            config,
+            config: config.clone(),
             weights,
             state,
             file: Some(file),
             mmap: Some(mmap),
+            rope_freqs,
         })
+    }
+
+    fn precompute_rope_freqs(config: &Config) -> Vec<Vec<(f32, f32)>> {
+        let seq_len = config.seq_len as usize;
+        let dim = config.dim as usize;
+        let head_size = (config.dim / config.n_heads) as f32;
+    
+        let freqs: Vec<f32> = (0..dim)
+            .step_by(2)
+            .map(|i| {
+                let head_dim = (i % head_size as usize) as f32;
+                1.0 / 10000f32.powf(head_dim / head_size)
+            })
+            .collect();
+    
+        let mut rope_freqs = vec![vec![(0.0, 0.0); freqs.len()]; seq_len];
+    
+        for pos in 0..seq_len {
+            for (j, &freq) in freqs.iter().enumerate() {
+                let val = pos as f32 * freq;
+                rope_freqs[pos][j] = (val.cos(), val.sin());
+            }
+        }
+    
+        rope_freqs
     }
 
     fn memory_map_weights(
@@ -197,6 +227,7 @@ impl Transformer {
         let kv_mul = p.n_heads / p.n_kv_heads; // integer multiplier of the kv sharing in multiquery
         let hidden_dim = p.hidden_dim as usize;
         let head_size = dim / p.n_heads as usize;
+        let head_size_sqrt = (head_size as f32).sqrt();
 
         // Copy the token embedding into x
         let content_row =
@@ -243,13 +274,10 @@ impl Transformer {
             );
 
             // RoPE relative positional encoding
-            for i in (0..dim).step_by(2) {
-                let head_dim = i % head_size;
-                let freq = 1.0f32 / (10000.0f32).powf(head_dim as f32 / head_size as f32);
-                let val = pos as f32 * freq;
-                let fcr = val.cos();
-                let fci = val.sin();
+            for (j, i) in (0..dim).step_by(2).enumerate() {
                 let rotn = if i < kv_dim as usize { 2 } else { 1 }; // how many vectors? 2 = q & k, 1 = q only
+
+                let (fcr, fci) = self.rope_freqs[pos as usize][j];
 
                 for v in 0..rotn {
                     let vec = if v == 0 {
@@ -284,7 +312,7 @@ impl Transformer {
                         .zip(k.iter())
                         .map(|(&qi, &ki)| qi * ki)
                         .sum::<f32>()
-                        / (head_size as f32).sqrt();
+                        / head_size_sqrt;
 
                     att[t] = score;
                 }

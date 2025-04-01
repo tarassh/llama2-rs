@@ -9,7 +9,7 @@
             "request": "launch",
             "name": "llama2-rs",
             "program": "${workspaceFolder}/target/debug/llama2-rs",
-            "args": ["stories42M.bin", "-t", "0.8", "-n", "256", "-i", "One day, Lily met a Shoggoth"],
+            "args": ["stories42M.bin", "-t", "0.1", "-n", "256", "-i", "One day, Lily met a Shoggoth"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_LOG": "debug"
