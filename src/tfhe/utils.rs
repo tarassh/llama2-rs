@@ -215,62 +215,6 @@ fn fixed_exp_chebyshev(x: i64) -> i64 {
     result
 }
 
-fn log_fixed(x: i64) -> i64 {
-    debug_assert!(x > 0, "log(x) requires x > 0");
-
-    let mut k = 0;
-    let mut m = x;
-
-    // Normalize `x` into the range [0.5,2]
-    while m > 2 * SCALE_FACTOR {
-        m /= 2;
-        k += 1;
-    }
-    while m < SCALE_FACTOR / 2 {
-        m *= 2;
-        k -= 1;
-    }
-
-    // Improved `z` scaling
-    let z = (m - SCALE_FACTOR) * 5 / 7;
-
-    let z2 = (z as i128 * z as i128 / SCALE_FACTOR as i128) as i64;
-    let z3 = (z2 as i128 * z as i128 / SCALE_FACTOR as i128) as i64;
-    let z4 = (z3 as i128 * z as i128 / SCALE_FACTOR as i128) as i64;
-
-    let log_m = (1_442_695_500 * z) / SCALE_FACTOR
-        + (-721_347_250 * z2) / SCALE_FACTOR
-        + (144_269_125 * z3) / SCALE_FACTOR
-        + (-21_640_000 * z4) / SCALE_FACTOR;
-
-    let log_result = log_m + k * 693_147_180; // ln(2) ≈ 0.693147180
-
-    println!(
-        "log_fixed({}): k={}, m={}, z={}, log_m={}, log_result={}",
-        x, k, m, z, log_m, log_result
-    );
-
-    log_result
-}
-
-pub fn pow_fixed(x: i64, y: i64) -> i64 {
-    if x == SCALE_FACTOR {
-        return SCALE_FACTOR; // 1^y = 1
-    }
-    if y == 0 {
-        return SCALE_FACTOR; // x^0 = 1
-    }
-
-    // Compute ln(x) using high-precision Chebyshev
-    let log_x = log_fixed(x);
-
-    // Compute y * ln(x) in fixed-point
-    let exp_input = ((y as i128 * log_x as i128) / SCALE_FACTOR as i128) as i64;
-
-    // Compute exp(y * ln(x)) using pre-verified `exp_fixed()`
-    exp_fixed(exp_input)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,40 +396,4 @@ mod tests {
             );
         }
     }
-
-    // #[test]
-    // fn test_pow_fixed() {
-    //     let test_cases = vec![
-    //         (2.0, 0.5),  // sqrt(2)
-    //         (2.0, 1.0),  // 2^1 = 2
-    //         (2.0, 2.0),  // 2^2 = 4
-    //         (3.0, 3.0),  // 3^3 = 27
-    //         (5.0, -1.0), // 5^-1 = 1/5
-    //         (10.0, 0.3), // 10^0.3
-    //     ];
-
-    //     for &(base, exp) in &test_cases {
-    //         let base_fixed = encode_fixed(base);
-    //         let exp_fixed = encode_fixed(exp);
-
-    //         let result_fixed = pow_fixed(base_fixed, exp_fixed);
-    //         let result = decode_fixed(result_fixed);
-    //         let expected = base.powf(exp);
-
-    //         let error = (result - expected).abs();
-    //         let tolerance = 0.0001; // Allow small error
-
-    //         println!(
-    //             "Testing {}^{}: Expected = {:.6}, Got = {:.6}, Error = {:.6}",
-    //             base, exp, expected, result, error
-    //         );
-
-    //         assert!(
-    //             error < tolerance,
-    //             "Mismatch in pow_fixed for {}^{}",
-    //             base,
-    //             exp
-    //         );
-    //     }
-    // }
 }
