@@ -1,8 +1,8 @@
+use super::utils;
+use super::utils::FixedPoint;
 use std::fs::File;
-use std::i64;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
-use super::utils;
 
 #[derive(Debug)]
 pub struct TokenIndex {
@@ -12,8 +12,8 @@ pub struct TokenIndex {
 
 #[derive(Debug)]
 pub struct Tokenizer {
-    pub vocab: Vec<String>,     // Changed from char** to Vec<String>
-    pub vocab_scores: Vec<i64>, // Changed from float* to Vec<f32>
+    pub vocab: Vec<String>,            // Changed from char** to Vec<String>
+    pub vocab_scores: Vec<FixedPoint>, // Changed from float* to Vec<f32>
     pub sorted_vocab: Vec<TokenIndex>,
     pub vocab_size: i32,
     pub max_token_length: u32,
@@ -50,7 +50,7 @@ impl Tokenizer {
             let mut score_bytes = [0u8; 4];
             file.read_exact(&mut score_bytes)?;
             let score = f32::from_le_bytes(score_bytes);
-            vocab_scores.push( utils::encode_fixed( score) );
+            vocab_scores.push(utils::encode_fixed(score));
 
             // Read string length
             let mut len_bytes = [0u8; 4];
@@ -168,7 +168,7 @@ impl Tokenizer {
 
         // Merge tokens according to vocab scores
         loop {
-            let mut best_score = i64::MIN;
+            let mut best_score = FixedPoint::MIN;
             let mut best_id = -1;
             let mut best_idx = -1;
 

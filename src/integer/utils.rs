@@ -1,19 +1,38 @@
 use rayon::prelude::*;
 
-const SCALE_FACTOR: i64 = 1_000_000_000; // 10^9 for 9 decimal places
-const EPSILON: i64 = 10_000; // Equivalent to 1e-5 in fixed-point
+pub type FixedPoint = i64;
 
-/// Helper function to convert `f32` to `i64` fixed-point.
-pub fn encode_fixed(value: f32) -> i64 {
-    (value * SCALE_FACTOR as f32) as i64
+const SCALE_FACTOR: FixedPoint = 1_000_000_000; // 10^9 for 9 decimal places
+const EPSILON: FixedPoint = 10_000; // Equivalent to 1e-5 in fixed-point
+
+pub const ONE: FixedPoint = SCALE_FACTOR; // 1.0 in fixed-point
+
+pub trait FixedPointExt {
+    fn one() -> Self;
+    fn normalize(n: usize) -> Self;
 }
 
-/// Helper function to convert `i64` fixed-point back to `f32`.
-pub fn decode_fixed(value: i64) -> f32 {
+impl FixedPointExt for FixedPoint {
+    fn one() -> Self {
+        ONE
+    }
+
+    fn normalize(n: usize) -> Self {
+        (n as FixedPoint * SCALE_FACTOR) as Self
+    }
+}
+
+/// Helper function to convert `f32` to `FixedPoint` fixed-point.
+pub fn encode_fixed(value: f32) -> FixedPoint {
+    (value * SCALE_FACTOR as f32) as FixedPoint
+}
+
+/// Helper function to convert `FixedPoint` fixed-point back to `f32`.
+pub fn decode_fixed(value: FixedPoint) -> f32 {
     value as f32 / SCALE_FACTOR as f32
 }
 
-pub fn rmsnorm_fixed(o: &mut [i64], x: &[i64], weight: &[i64], size: usize) {
+pub fn rmsnorm_fixed(o: &mut [FixedPoint], x: &[FixedPoint], weight: &[FixedPoint], size: usize) {
     debug_assert_eq!(o.len(), size);
     debug_assert_eq!(x.len(), size);
     debug_assert_eq!(weight.len(), size);
@@ -26,18 +45,18 @@ pub fn rmsnorm_fixed(o: &mut [i64], x: &[i64], weight: &[i64], size: usize) {
         / size as i128;
 
     // Step 2: Compute inverse square root (Fixed-Point)
-    let scale: i64 = fixed_inv_sqrt(ss as i64 + EPSILON);
+    let scale: FixedPoint = fixed_inv_sqrt(ss as FixedPoint + EPSILON);
 
     // Step 3: Normalize and scale
     for j in 0..size {
         o[j] = ((weight[j] as i128 * scale as i128 * x[j] as i128)
-            / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128 * 2)) as i64;
+            / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128 * 2)) as FixedPoint;
     }
 }
 
-/// Compute `1 / sqrt(value)` in fixed-point (`i64`) using Newton-Raphson.
+/// Compute `1 / sqrt(value)` in fixed-point (`FixedPoint`) using Newton-Raphson.
 /// Assumes `value` is in fixed-point format (`SCALE_FACTOR` precision).
-fn fixed_inv_sqrt(value: i64) -> i64 {
+fn fixed_inv_sqrt(value: FixedPoint) -> FixedPoint {
     debug_assert!(value > 0, "Input must be positive");
 
     let mut x = SCALE_FACTOR; // Initial guess (1.0 in fixed-point)
@@ -62,14 +81,14 @@ fn fixed_inv_sqrt(value: i64) -> i64 {
     x
 }
 
-/// Apply softmax normalization in-place using fixed-point `i64`
-pub fn softmax_fixed(x: &mut [i64]) {
+/// Apply softmax normalization in-place using fixed-point `FixedPoint`
+pub fn softmax_fixed(x: &mut [FixedPoint]) {
     // Find max value (for numerical stability)
     let max_val = *x.iter().max().unwrap();
 
     // Compute exponentials in fixed-point
     let mut sum: i128 = 0;
-    let mut exp_values: Vec<i64> = vec![0; x.len()];
+    let mut exp_values: Vec<FixedPoint> = vec![0; x.len()];
 
     for (i, xi) in x.iter().enumerate() {
         let shifted_x = xi - max_val; // Scale exponent input
@@ -79,14 +98,20 @@ pub fn softmax_fixed(x: &mut [i64]) {
 
     // Normalize each value
     for i in 0..x.len() {
-        x[i] = ((exp_values[i] as i128 * SCALE_FACTOR as i128) / sum) as i64;
+        x[i] = ((exp_values[i] as i128 * SCALE_FACTOR as i128) / sum) as FixedPoint;
     }
 }
 
 /// Fixed-Point Matrix multiplication: W (d,n) @ x (n,) -> xout (d,)
 /// Parallelized version using Rayon
 #[cfg(feature = "parallel")]
-pub fn matmul_fixed(xout: &mut [i64], x: &[i64], w: &[i64], n: usize, d: usize) {
+pub fn matmul_fixed(
+    xout: &mut [FixedPoint],
+    x: &[FixedPoint],
+    w: &[FixedPoint],
+    n: usize,
+    d: usize,
+) {
     // Verify dimensions
     debug_assert_eq!(xout.len(), d);
     debug_assert_eq!(x.len(), n);
@@ -99,14 +124,20 @@ pub fn matmul_fixed(xout: &mut [i64], x: &[i64], w: &[i64], n: usize, d: usize) 
             .iter()
             .zip(x.iter())
             .map(|(&w_ij, &x_j)| (w_ij as i128 * x_j as i128) / SCALE_FACTOR as i128) // Fixed-point multiplication
-            .sum::<i128>() as i64;
+            .sum::<i128>() as FixedPoint;
     });
 }
 
 /// Fixed-Point Matrix multiplication: W (d,n) @ x (n,) -> xout (d,)
 /// Sequential version for when parallel feature is not enabled
 #[cfg(not(feature = "parallel"))]
-pub fn matmul_fixed(xout: &mut [i64], x: &[i64], w: &[i64], n: usize, d: usize) {
+pub fn matmul_fixed(
+    xout: &mut [FixedPoint],
+    x: &[FixedPoint],
+    w: &[FixedPoint],
+    n: usize,
+    d: usize,
+) {
     // Verify dimensions
     debug_assert_eq!(xout.len(), d);
     debug_assert_eq!(x.len(), n);
@@ -119,12 +150,12 @@ pub fn matmul_fixed(xout: &mut [i64], x: &[i64], w: &[i64], n: usize, d: usize) 
             .iter()
             .zip(x.iter())
             .map(|(&w_ij, &x_j)| (w_ij as i128 * x_j as i128) / SCALE_FACTOR as i128) // Fixed-point multiplication
-            .sum::<i128>() as i64;
+            .sum::<i128>() as FixedPoint;
     }
 }
 
 // Precomputed powers of `e` for small integers
-const E_POWERS: [i64; 10] = [
+const E_POWERS: [FixedPoint; 10] = [
     1_000_000_000,     // e^0  = 1.0
     2_718_281_828,     // e^1  = 2.718...
     7_389_056_099,     // e^2  = 7.389...
@@ -138,14 +169,16 @@ const E_POWERS: [i64; 10] = [
 ];
 
 // Compute exp(x) in fixed-point arithmetic using Taylor series
-pub fn exp_fixed(x: i64) -> i64 {
-    if x == 0 { return SCALE_FACTOR; }
+pub fn exp_fixed(x: FixedPoint) -> FixedPoint {
+    if x == 0 {
+        return SCALE_FACTOR;
+    }
 
     let int_part = x / SCALE_FACTOR;
     let frac_part = x % SCALE_FACTOR;
 
     // Handle integer part using E_POWERS if within range
-    let mut result = if int_part.abs() < E_POWERS.len() as i64 {
+    let mut result = if int_part.abs() < E_POWERS.len() as FixedPoint {
         if int_part >= 0 {
             E_POWERS[int_part as usize]
         } else {
@@ -158,41 +191,45 @@ pub fn exp_fixed(x: i64) -> i64 {
         let mut value = SCALE_FACTOR;
         while exp > 0 {
             if exp % 2 == 1 {
-                value = (value as i128 * base as i128 / SCALE_FACTOR as i128) as i64;
+                value = (value as i128 * base as i128 / SCALE_FACTOR as i128) as FixedPoint;
             }
-            base = (base as i128 * base as i128 / SCALE_FACTOR as i128) as i64;
+            base = (base as i128 * base as i128 / SCALE_FACTOR as i128) as FixedPoint;
             exp /= 2;
         }
-        if int_part > 0 { value } else { (SCALE_FACTOR * SCALE_FACTOR) / value }
+        if int_part > 0 {
+            value
+        } else {
+            (SCALE_FACTOR * SCALE_FACTOR) / value
+        }
     };
 
     // Apply fractional part using Chebyshev
     if frac_part != 0 {
         let frac_result = fixed_exp_chebyshev(frac_part);
-        result = (result as i128 * frac_result as i128 / SCALE_FACTOR as i128) as i64;
+        result = (result as i128 * frac_result as i128 / SCALE_FACTOR as i128) as FixedPoint;
     }
 
     result
 }
 
 // Chebyshev coefficients for exp(x) on [-1,1]
-const C0: i64 = 1_000_000_000;
-const C1: i64 = 1_000_000_000;
-const C2: i64 = 500_000_000;
-const C3: i64 = 166_666_667;
-const C4: i64 = 41_666_667;
-const C5: i64 = 8_333_333;
-const C6: i64 = 1_388_888;
-const C7: i64 = 198_412;
+const C0: FixedPoint = 1_000_000_000;
+const C1: FixedPoint = 1_000_000_000;
+const C2: FixedPoint = 500_000_000;
+const C3: FixedPoint = 166_666_667;
+const C4: FixedPoint = 41_666_667;
+const C5: FixedPoint = 8_333_333;
+const C6: FixedPoint = 1_388_888;
+const C7: FixedPoint = 198_412;
 
 // Chebyshev approximation for e^x when x ∈ [-1,1]
-fn fixed_exp_chebyshev(x: i64) -> i64 {
-    let x2 = (x as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
-    let x3 = (x2 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
-    let x4 = (x3 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
-    let x5 = (x4 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
-    let x6 = (x5 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
-    let x7 = (x6 as i128 * x as i128 / SCALE_FACTOR as i128) as i64;
+fn fixed_exp_chebyshev(x: FixedPoint) -> FixedPoint {
+    let x2 = (x as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
+    let x3 = (x2 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
+    let x4 = (x3 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
+    let x5 = (x4 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
+    let x6 = (x5 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
+    let x7 = (x6 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
 
     let result = C0
         + (C1 * x) / SCALE_FACTOR
@@ -232,19 +269,9 @@ mod tests {
             -0.001,     // e^(-0.001)
             -25.824846, // e^(-25.824846)
             -20.234,    // e^(-20.234)
-            -7.4335403, 
-            -8.710781,  
-            -9.919607,  
-            -10.041857, 
-            -7.064037,  
-            -8.489454,  
-            -11.895886, 
-            -6.072899,  
-            -11.976686, 
-            -11.888927, 
-            -8.481754,  
-            -30.182629, 
-            -3.14159,   // e^(-3.14159)
+            -7.4335403, -8.710781, -9.919607, -10.041857, -7.064037, -8.489454, -11.895886,
+            -6.072899, -11.976686, -11.888927, -8.481754, -30.182629,
+            -3.14159, // e^(-3.14159)
         ];
 
         for &x in &test_cases {
@@ -273,9 +300,9 @@ mod tests {
         // Weights for normalization (arbitrary test values)
         let weight_f32 = vec![0.5, 0.5, 0.5, 0.5, 0.5];
 
-        // Convert `f32` to `i64` fixed-point
-        let x_i64: Vec<i64> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
-        let weight_i64: Vec<i64> = weight_f32.iter().map(|&v| encode_fixed(v)).collect();
+        // Convert `f32` to `FixedPoint` fixed-point
+        let x_i64: Vec<FixedPoint> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
+        let weight_i64: Vec<FixedPoint> = weight_f32.iter().map(|&v| encode_fixed(v)).collect();
         let size = x_i64.len();
 
         // Output buffers
@@ -293,7 +320,7 @@ mod tests {
 
         // Print results for debugging
         println!("Expected (f32): {:?}", output_f32);
-        println!("Output (Fixed i64 → f32): {:?}", output_fixed_f32);
+        println!("Output (Fixed FixedPoint → f32): {:?}", output_fixed_f32);
 
         // Assert values are close within a small tolerance
         let tolerance = 1e-5;
@@ -311,8 +338,8 @@ mod tests {
     fn test_softmax_fixed() {
         let x_f32 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
 
-        // Convert `f32` to `i64`
-        let mut x_i64: Vec<i64> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
+        // Convert `f32` to `FixedPoint`
+        let mut x_i64: Vec<FixedPoint> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
 
         // Run fixed-point softmax
         softmax_fixed(&mut x_i64);
@@ -326,7 +353,7 @@ mod tests {
 
         // Print results for debugging
         println!("Expected (f32): {:?}", expected_f32);
-        println!("Output (Fixed i64 → f32): {:?}", output_f32);
+        println!("Output (Fixed FixedPoint → f32): {:?}", output_f32);
 
         // Compare results with a small tolerance
         let tolerance = 1e-5;
@@ -348,8 +375,8 @@ mod tests {
         let n = 3;
 
         // Convert to fixed-point
-        let x_i64: Vec<i64> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
-        let w_i64: Vec<i64> = w_f32.iter().map(|&v| encode_fixed(v)).collect();
+        let x_i64: Vec<FixedPoint> = x_f32.iter().map(|&v| encode_fixed(v)).collect();
+        let w_i64: Vec<FixedPoint> = w_f32.iter().map(|&v| encode_fixed(v)).collect();
         let mut output_i64 = vec![0; d];
         let mut output_f32 = vec![0.0; d];
 
@@ -364,7 +391,7 @@ mod tests {
 
         // Print debug output
         println!("Expected (f32): {:?}", output_f32);
-        println!("Output (Fixed i64 → f32): {:?}", output_fixed_f32);
+        println!("Output (Fixed FixedPoint → f32): {:?}", output_fixed_f32);
 
         // Assert values are close within a small tolerance
         let tolerance = 1e-5;

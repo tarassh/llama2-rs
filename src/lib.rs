@@ -3,9 +3,9 @@ use sampler::Sampler;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokenizer::Tokenizer;
 
+pub mod integer;
 pub mod model;
 pub mod sampler;
-pub mod integer;
 pub mod tokenizer;
 pub mod utils;
 

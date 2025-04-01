@@ -114,7 +114,7 @@ impl Transformer {
         let seq_len = config.seq_len as usize;
         let dim = config.dim as usize;
         let head_size = (config.dim / config.n_heads) as f32;
-    
+
         let freqs: Vec<f32> = (0..dim)
             .step_by(2)
             .map(|i| {
@@ -122,16 +122,16 @@ impl Transformer {
                 1.0 / 10000f32.powf(head_dim / head_size)
             })
             .collect();
-    
+
         let mut rope_freqs = vec![vec![(0.0, 0.0); freqs.len()]; seq_len];
-    
+
         for pos in 0..seq_len {
             for (j, &freq) in freqs.iter().enumerate() {
                 let val = pos as f32 * freq;
                 rope_freqs[pos][j] = (val.cos(), val.sin());
             }
         }
-    
+
         rope_freqs
     }
 
