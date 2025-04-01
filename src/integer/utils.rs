@@ -72,10 +72,17 @@ fn fixed_inv_sqrt(value: FixedPoint) -> FixedPoint {
         x *= 2;
     }
 
-    // Perform Newton-Raphson iterations
+    // Perform Newton-Raphson iterations using i128 for safety
     for _ in 0..3 {
-        x = (x * (3 * SCALE_FACTOR - ((v * x / SCALE_FACTOR) * x / SCALE_FACTOR)) / 2)
-            / SCALE_FACTOR;
+        let x_i128 = x as i128;
+        let v_i128 = v as i128;
+        let scale_i128 = SCALE_FACTOR as i128;
+
+        // Compute inner terms safely in i128
+        let vx_sq = (v_i128 * x_i128 / scale_i128) * x_i128 / scale_i128;
+        let three_scale_minus_vx_sq = (3 * scale_i128) - vx_sq;
+
+        x = ((x_i128 * three_scale_minus_vx_sq / 2) / scale_i128) as FixedPoint;
     }
 
     x

@@ -1,9 +1,10 @@
 use clap::{Arg, Command};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use llama2_rs::transformer::Transformer;
-use llama2_rs::sampler::Sampler;
-use llama2_rs::tokenizer::Tokenizer;
+use llama2_rs::integer::transformer::Transformer;
+use llama2_rs::integer::sampler::Sampler;
+use llama2_rs::integer::tokenizer::Tokenizer;
+use llama2_rs::integer::generate;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("run")
         .version("1.0")
@@ -128,11 +129,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tokenizer = Tokenizer::build_tokenizer(tokenizer, model.config.vocab_size)?;
 
     // Load the sampler
+    let p_value = llama2_rs::integer::utils::encode_fixed(p_value);
+    let temperature = llama2_rs::integer::utils::encode_fixed(temperature);
     let mut sampler = Sampler::new(model.config.vocab_size, temperature, p_value, seed);
 
     match mode {
         "generate" => {
-            llama2_rs::generate(
+            generate(
                 &mut model,
                 &mut tokenizer,
                 &mut sampler,
