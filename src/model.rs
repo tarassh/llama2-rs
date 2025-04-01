@@ -227,6 +227,7 @@ impl Transformer {
         let kv_mul = p.n_heads / p.n_kv_heads; // integer multiplier of the kv sharing in multiquery
         let hidden_dim = p.hidden_dim as usize;
         let head_size = dim / p.n_heads as usize;
+        let head_size_sqrt = (head_size as f32).sqrt();
 
         // Copy the token embedding into x
         let content_row =
@@ -274,11 +275,6 @@ impl Transformer {
 
             // RoPE relative positional encoding
             for (j, i) in (0..dim).step_by(2).enumerate() {
-                let head_dim = i % head_size;
-                let freq = 1.0f32 / (10000.0f32).powf(head_dim as f32 / head_size as f32);
-                let val = pos as f32 * freq;
-                let _fcr = val.cos();
-                let _fci = val.sin();
                 let rotn = if i < kv_dim as usize { 2 } else { 1 }; // how many vectors? 2 = q & k, 1 = q only
 
                 let (fcr, fci) = self.rope_freqs[pos as usize][j];
@@ -316,7 +312,7 @@ impl Transformer {
                         .zip(k.iter())
                         .map(|(&qi, &ki)| qi * ki)
                         .sum::<f32>()
-                        / (head_size as f32).sqrt();
+                        / head_size_sqrt;
 
                     att[t] = score;
                 }
