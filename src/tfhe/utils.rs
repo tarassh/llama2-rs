@@ -129,29 +129,23 @@ const E_POWERS: [i64; 10] = [
 
 // Compute exp(x) in fixed-point arithmetic using Taylor series
 pub fn exp_fixed(x: i64) -> i64 {
-    if x == 0 {
-        return SCALE_FACTOR; // e^0 = 1
-    }
+    if x == 0 { return SCALE_FACTOR; }
 
-    // If x is in the range [-1,1], use Chebyshev polynomial approximation
-    if -SCALE_FACTOR < x && x < SCALE_FACTOR {
-        return fixed_exp_chebyshev(x);
-    }
+    let int_part = x / SCALE_FACTOR;
+    let frac_part = x % SCALE_FACTOR;
 
-    let int_part = (x / SCALE_FACTOR) as i32; // Integer part of x
-    let frac_part = x % SCALE_FACTOR; // Fractional part of x
-
-    let mut result; // Declare result without initial assignment
-
-    // If the integer part is small, use precomputed values
-    if int_part >= 0 && (int_part as usize) < E_POWERS.len() {
-        result = E_POWERS[int_part as usize];
+    // Handle integer part using E_POWERS if within range
+    let mut result = if int_part.abs() < E_POWERS.len() as i64 {
+        if int_part >= 0 {
+            E_POWERS[int_part as usize]
+        } else {
+            (SCALE_FACTOR * SCALE_FACTOR) / E_POWERS[int_part.abs() as usize]
+        }
     } else {
-        // For larger int_part, use exponentiation by squaring
+        // Use exponentiation-by-squaring for large integer parts (rarely happens in your range)
         let mut base = 2_718_281_828; // e^1
         let mut exp = int_part.abs();
-        let mut value = SCALE_FACTOR; // 1.0 in fixed-point
-
+        let mut value = SCALE_FACTOR;
         while exp > 0 {
             if exp % 2 == 1 {
                 value = (value as i128 * base as i128 / SCALE_FACTOR as i128) as i64;
@@ -159,26 +153,13 @@ pub fn exp_fixed(x: i64) -> i64 {
             base = (base as i128 * base as i128 / SCALE_FACTOR as i128) as i64;
             exp /= 2;
         }
+        if int_part > 0 { value } else { (SCALE_FACTOR * SCALE_FACTOR) / value }
+    };
 
-        result = if int_part > 0 {
-            value
-        } else {
-            SCALE_FACTOR * SCALE_FACTOR / value
-        };
-    }
-
-    // Compute `e^frac(x)` using a polynomial (Taylor series)
-    let mut term = SCALE_FACTOR; // First term is 1
-    let numerator = frac_part;
-    let mut denominator = SCALE_FACTOR;
-
-    for i in 1..15 {
-        // Higher terms improve accuracy
-        term = (term as i128 * numerator as i128 / SCALE_FACTOR as i128) as i64;
-        denominator = (denominator as i128 * i as i128) as i64;
-        result = ((result as i128 * SCALE_FACTOR as i128) / SCALE_FACTOR as i128
-            * (SCALE_FACTOR as i128 + term as i128 / denominator as i128)
-            / SCALE_FACTOR as i128) as i64;
+    // Apply fractional part using Chebyshev
+    if frac_part != 0 {
+        let frac_result = fixed_exp_chebyshev(frac_part);
+        result = (result as i128 * frac_result as i128 / SCALE_FACTOR as i128) as i64;
     }
 
     result
