@@ -3,11 +3,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokenizer::Tokenizer;
 use transformer::Transformer;
 
+pub mod fixed_point;
 pub mod sampler;
 pub mod tokenizer;
-pub mod utils;
 pub mod transformer;
-
 
 /// Returns the current time in milliseconds since the Unix epoch
 pub fn time_in_ms() -> u128 {

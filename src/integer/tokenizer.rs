@@ -1,8 +1,8 @@
-use super::utils;
-use super::utils::FixedPoint;
+use crate::integer::fixed_point as utils;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
+use utils::FixedPoint;
 
 #[derive(Debug)]
 pub struct TokenIndex {

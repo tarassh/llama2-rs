@@ -1,5 +1,5 @@
-use super::utils;
-use super::utils::{FixedPoint, FixedPointExt};
+use crate::integer::fixed_point as utils;
+use utils::{FixedPoint, FixedPointExt};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProbIndex {
@@ -125,7 +125,7 @@ impl Sampler {
     // Generate random fixed-point number between [0, SCALE_FACTOR) as i64
     fn random_fixed(&mut self) -> FixedPoint {
         let rand_u64 = self.random_u64() >> 34; // Keep top 30 bits
-        (rand_u64 as FixedPoint * FixedPoint::one()) >> 30
+        ((rand_u64 * FixedPoint::one() as u64) >> 30) as FixedPoint
     }
 
     pub fn sample(&mut self, logits: &[FixedPoint]) -> i32 {

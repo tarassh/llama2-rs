@@ -1,9 +1,9 @@
 use rayon::prelude::*;
 
-pub type FixedPoint = i64;
+pub type FixedPoint = i32;
 
-const SCALE_FACTOR: FixedPoint = 1_000_000_000; // 10^9 for 9 decimal places
-const EPSILON: FixedPoint = 10_000; // Equivalent to 1e-5 in fixed-point
+const SCALE_FACTOR: FixedPoint = 65_536; // 10^9 for 9 decimal places
+const EPSILON: i64 = 1; // Equivalent to 1e-5 in fixed-point
 
 pub const ONE: FixedPoint = SCALE_FACTOR; // 1.0 in fixed-point
 
@@ -29,8 +29,14 @@ impl FixedPointExt for FixedPoint {
         if other == Self::one() {
             return self;
         }
+        if self == -Self::one() {
+            return -other;
+        }
+        if other == -Self::one() {
+            return -self;
+        }
 
-        (self as i128 * other as i128 / SCALE_FACTOR as i128) as Self
+        ((self as i64 * other as i64) >> 16) as FixedPoint
     }
 }
 
@@ -49,20 +55,16 @@ pub fn rmsnorm_fixed(o: &mut [FixedPoint], x: &[FixedPoint], weight: &[FixedPoin
     debug_assert_eq!(x.len(), size);
     debug_assert_eq!(weight.len(), size);
 
-    // Step 1: Compute sum of squares in fixed-point
-    let ss: i128 = x
+    let ss: i64 = x
         .iter()
-        .map(|&xi| (xi as i128 * xi as i128) / SCALE_FACTOR as i128)
-        .sum::<i128>()
-        / size as i128;
+        .map(|&xi| ((xi as i64 * xi as i64) >> 16))
+        .sum::<i64>()
+        / size as i64;
 
-    // Step 2: Compute inverse square root (Fixed-Point)
-    let scale: FixedPoint = fixed_inv_sqrt(ss as FixedPoint + EPSILON);
+    let scale: FixedPoint = fixed_inv_sqrt((ss + EPSILON) as FixedPoint);
 
-    // Step 3: Normalize and scale
     for j in 0..size {
-        o[j] = ((weight[j] as i128 * scale as i128 * x[j] as i128)
-            / (SCALE_FACTOR as i128 * SCALE_FACTOR as i128 * 2)) as FixedPoint;
+        o[j] = ((weight[j] as i64 * scale as i64 * x[j] as i64) >> 32) as FixedPoint;
     }
 }
 
@@ -71,10 +73,9 @@ pub fn rmsnorm_fixed(o: &mut [FixedPoint], x: &[FixedPoint], weight: &[FixedPoin
 fn fixed_inv_sqrt(value: FixedPoint) -> FixedPoint {
     debug_assert!(value > 0, "Input must be positive");
 
-    let mut x = SCALE_FACTOR; // Initial guess (1.0 in fixed-point)
+    let mut x = SCALE_FACTOR; // initial guess (1.0)
     let mut v = value;
 
-    // Normalize `v` to prevent overflow in large numbers
     while v > SCALE_FACTOR * 10 {
         v /= 4;
         x /= 2;
@@ -84,13 +85,11 @@ fn fixed_inv_sqrt(value: FixedPoint) -> FixedPoint {
         x *= 2;
     }
 
-    // Perform Newton-Raphson iterations using i128 for safety
     for _ in 0..3 {
         let x_i128 = x as i128;
         let v_i128 = v as i128;
         let scale_i128 = SCALE_FACTOR as i128;
 
-        // Compute inner terms safely in i128
         let vx_sq = (v_i128 * x_i128 / scale_i128) * x_i128 / scale_i128;
         let three_scale_minus_vx_sq = (3 * scale_i128) - vx_sq;
 
@@ -102,22 +101,18 @@ fn fixed_inv_sqrt(value: FixedPoint) -> FixedPoint {
 
 /// Apply softmax normalization in-place using fixed-point `FixedPoint`
 pub fn softmax_fixed(x: &mut [FixedPoint]) {
-    // Find max value (for numerical stability)
     let max_val = *x.iter().max().unwrap();
-
-    // Compute exponentials in fixed-point
-    let mut sum: i128 = 0;
+    let mut sum: i64 = 0;
     let mut exp_values: Vec<FixedPoint> = vec![0; x.len()];
 
     for (i, xi) in x.iter().enumerate() {
-        let shifted_x = xi - max_val; // Scale exponent input
+        let shifted_x = xi - max_val;
         exp_values[i] = exp_fixed(shifted_x);
-        sum += exp_values[i] as i128;
+        sum += exp_values[i] as i64;
     }
 
-    // Normalize each value
     for i in 0..x.len() {
-        x[i] = ((exp_values[i] as i128 * SCALE_FACTOR as i128) / sum) as FixedPoint;
+        x[i] = ((exp_values[i] as i64 * SCALE_FACTOR as i64) / sum) as FixedPoint;
     }
 }
 
@@ -131,19 +126,17 @@ pub fn matmul_fixed(
     n: usize,
     d: usize,
 ) {
-    // Verify dimensions
     debug_assert_eq!(xout.len(), d);
     debug_assert_eq!(x.len(), n);
     debug_assert_eq!(w.len(), d * n);
 
-    // Parallel iteration over rows
     xout.par_iter_mut().enumerate().for_each(|(i, val)| {
         let row_start = i * n;
         *val = w[row_start..row_start + n]
             .iter()
             .zip(x.iter())
-            .map(|(&w_ij, &x_j)| (w_ij as i128 * x_j as i128) / SCALE_FACTOR as i128) // Fixed-point multiplication
-            .sum::<i128>() as FixedPoint;
+            .map(|(&w_ij, &x_j)| ((w_ij as i64 * x_j as i64) >> 16) as i64)
+            .sum::<i64>() as FixedPoint;
     });
 }
 
@@ -174,17 +167,18 @@ pub fn matmul_fixed(
 }
 
 // Precomputed powers of `e` for small integers
-const E_POWERS: [FixedPoint; 10] = [
-    1_000_000_000,     // e^0  = 1.0
-    2_718_281_828,     // e^1  = 2.718...
-    7_389_056_099,     // e^2  = 7.389...
-    20_085_536_923,    // e^3  = 20.085...
-    54_598_150_033,    // e^4  = 54.598...
-    148_413_159_103,   // e^5  = 148.413...
-    403_428_793_492,   // e^6  = 403.428...
-    1_096_633_158_428, // e^7
-    2_980_957_987_041, // e^8
-    8_103_083_927_576, // e^9
+const E_POWERS: [FixedPoint; 11] = [
+    65_536,        // e^0 = 1.0
+    178_145,       // e^1 = 2.718281828 * 65_536
+    484_249,       // e^2 = 7.389056099 * 65_536
+    1_316_325,     // e^3 = 20.085536923 * 65_536
+    3_578_144,     // e^4 = 54.598150033 * 65_536
+    9_726_404,     // e^5 = 148.413159103 * 65_536
+    26_439_109,    // e^6 = 403.428793492 * 65_536
+    71_868_952,    // e^7 = 1096.633158428 * 65_536
+    195_360_063,   // e^8 = 2980.957987041 * 65_536
+    531_043_712,   // e^9 = 8103.083927576 * 65_536
+    1_443_526_462, // e^10 = 22026.4657948067 * 65_536
 ];
 
 // Compute exp(x) in fixed-point arithmetic using Taylor series
@@ -193,71 +187,84 @@ pub fn exp_fixed(x: FixedPoint) -> FixedPoint {
         return SCALE_FACTOR;
     }
 
-    let int_part = x / SCALE_FACTOR;
-    let frac_part = x % SCALE_FACTOR;
+    let mut int_part = x / SCALE_FACTOR;
+    let mut frac_part = x % SCALE_FACTOR;
 
-    // Handle integer part using E_POWERS if within range
+    // Correct handling for negative fractional parts
+    if frac_part < 0 {
+        frac_part += SCALE_FACTOR;
+        int_part -= 1;
+    }
+
+    if frac_part == 0 && int_part.abs() < E_POWERS.len() as FixedPoint {
+        return if int_part >= 0 {
+            E_POWERS[int_part as usize]
+        } else {
+            ((SCALE_FACTOR as i64 * SCALE_FACTOR as i64) / E_POWERS[int_part.abs() as usize] as i64)
+                as FixedPoint
+        };
+    }
+
     let mut result = if int_part.abs() < E_POWERS.len() as FixedPoint {
         if int_part >= 0 {
             E_POWERS[int_part as usize]
         } else {
-            (SCALE_FACTOR * SCALE_FACTOR) / E_POWERS[int_part.abs() as usize]
+            ((SCALE_FACTOR as i64 * SCALE_FACTOR as i64) / E_POWERS[int_part.abs() as usize] as i64)
+                as FixedPoint
         }
     } else {
-        // Use exponentiation-by-squaring for large integer parts (rarely happens in your range)
-        let mut base = 2_718_281_828; // e^1
+        let mut base = 178_145; // e^1
         let mut exp = int_part.abs();
         let mut value = SCALE_FACTOR;
         while exp > 0 {
             if exp % 2 == 1 {
-                value = (value as i128 * base as i128 / SCALE_FACTOR as i128) as FixedPoint;
+                value = ((value as i64 * base as i64) >> 16) as FixedPoint;
             }
-            base = (base as i128 * base as i128 / SCALE_FACTOR as i128) as FixedPoint;
+            base = ((base as i64 * base as i64) >> 16) as FixedPoint;
             exp /= 2;
         }
         if int_part > 0 {
             value
         } else {
-            (SCALE_FACTOR * SCALE_FACTOR) / value
+            ((SCALE_FACTOR as i64 * SCALE_FACTOR as i64) / value as i64) as FixedPoint
         }
     };
 
-    // Apply fractional part using Chebyshev
     if frac_part != 0 {
         let frac_result = fixed_exp_chebyshev(frac_part);
-        result = (result as i128 * frac_result as i128 / SCALE_FACTOR as i128) as FixedPoint;
+        result = ((result as i64 * frac_result as i64) >> 16) as FixedPoint;
     }
 
     result
 }
 
-// Chebyshev coefficients for exp(x) on [-1,1]
-const C0: FixedPoint = 1_000_000_000;
-const C1: FixedPoint = 1_000_000_000;
-const C2: FixedPoint = 500_000_000;
-const C3: FixedPoint = 166_666_667;
-const C4: FixedPoint = 41_666_667;
-const C5: FixedPoint = 8_333_333;
-const C6: FixedPoint = 1_388_888;
-const C7: FixedPoint = 198_412;
+// Chebyshev coefficients for exp(x) on [-1,1] (Q16.16)
+const C0: FixedPoint = 65_536; // 1.0 * 65_536
+const C1: FixedPoint = 65_536; // 1.0 * 65_536
+const C2: FixedPoint = 32_768; // 0.5 * 65_536
+const C3: FixedPoint = 10_923; // 1/6 ≈ 0.1666667 * 65_536
+const C4: FixedPoint = 2_731; // 1/24 ≈ 0.0416667 * 65_536
+const C5: FixedPoint = 546; // 1/120 ≈ 0.0083333 * 65_536
+const C6: FixedPoint = 91; // 1/720 ≈ 0.0013889 * 65_536
+const C7: FixedPoint = 13; // 1/5040 ≈ 0.0001984 * 65_536
 
 // Chebyshev approximation for e^x when x ∈ [-1,1]
 fn fixed_exp_chebyshev(x: FixedPoint) -> FixedPoint {
-    let x2 = (x as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
-    let x3 = (x2 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
-    let x4 = (x3 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
-    let x5 = (x4 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
-    let x6 = (x5 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
-    let x7 = (x6 as i128 * x as i128 / SCALE_FACTOR as i128) as FixedPoint;
+    let x2 = ((x as i64 * x as i64) >> 16) as FixedPoint; // x^2
+    let x3 = ((x2 as i64 * x as i64) >> 16) as FixedPoint; // x^3
+    let x4 = ((x3 as i64 * x as i64) >> 16) as FixedPoint; // x^4
+    let x5 = ((x4 as i64 * x as i64) >> 16) as FixedPoint; // x^5
+    let x6 = ((x5 as i64 * x as i64) >> 16) as FixedPoint; // x^6
+    let x7 = ((x6 as i64 * x as i64) >> 16) as FixedPoint; // x^7
 
     let result = C0
-        + (C1 * x) / SCALE_FACTOR
-        + (C2 * x2) / SCALE_FACTOR
-        + (C3 * x3) / SCALE_FACTOR
-        + (C4 * x4) / SCALE_FACTOR
-        + (C5 * x5) / SCALE_FACTOR
-        + (C6 * x6) / SCALE_FACTOR
-        + (C7 * x7) / SCALE_FACTOR;
+        + ((C1 as i64 * x as i64) >> 16) as FixedPoint
+        + ((C2 as i64 * x2 as i64) >> 16) as FixedPoint
+        + ((C3 as i64 * x3 as i64) >> 16) as FixedPoint
+        + ((C4 as i64 * x4 as i64) >> 16) as FixedPoint
+        + ((C5 as i64 * x5 as i64) >> 16) as FixedPoint
+        + ((C6 as i64 * x6 as i64) >> 16) as FixedPoint
+        + ((C7 as i64 * x7 as i64) >> 16) as FixedPoint;
 
     result
 }
@@ -279,7 +286,12 @@ mod tests {
             1.0,        // e^1 = 2.718...
             2.0,        // e^2 = 7.389...
             3.0,        // e^3
+            4.0,        // e^4
             5.0,        // e^5
+            6.0,        // e^6
+            7.0,        // e^7
+            8.0,        // e^8
+            9.0,        // e^9
             -0.5,       // e^(-0.5)
             -0.25,      // e^(-0.25)
             -0.75,      // e^(-0.75)

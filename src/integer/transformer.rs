@@ -1,9 +1,9 @@
-use super::utils;
-use super::utils::{FixedPoint, FixedPointExt};
+use crate::integer::fixed_point as utils;
 use memmap2::Mmap;
 use std::fs::File;
 use std::io::Read;
 use std::{mem, ptr};
+use utils::{FixedPoint, FixedPointExt};
 
 // Configuration for the transformer architecture
 #[derive(Debug, Clone)]
@@ -69,7 +69,6 @@ pub struct Transformer {
     pub rope_freqs: Vec<Vec<(FixedPoint, FixedPoint)>>, // [seq_len][dim/2]
 }
 
-
 impl Transformer {
     pub fn read_checkpoint(checkpoint_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         // Open the file
@@ -129,7 +128,10 @@ impl Transformer {
         for pos in 0..seq_len {
             for (j, &freq) in freqs.iter().enumerate() {
                 let val = pos as f32 * freq;
-                rope_freqs[pos][j] = (utils::encode_fixed(val.cos()), utils::encode_fixed(val.sin()));
+                rope_freqs[pos][j] = (
+                    utils::encode_fixed(val.cos()),
+                    utils::encode_fixed(val.sin()),
+                );
             }
         }
 
@@ -198,9 +200,18 @@ impl Transformer {
 
         // Create the weights structure
         let weights = TransformerWeights {
-            token_embedding_table: token_embedding_table.iter().map(|&x| utils::encode_fixed(x)).collect(),
-            rms_att_weight: rms_att_weight.iter().map(|&x| utils::encode_fixed(x)).collect(),
-            rms_ffn_weight: rms_ffn_weight.iter().map(|&x| utils::encode_fixed(x)).collect(),
+            token_embedding_table: token_embedding_table
+                .iter()
+                .map(|&x| utils::encode_fixed(x))
+                .collect(),
+            rms_att_weight: rms_att_weight
+                .iter()
+                .map(|&x| utils::encode_fixed(x))
+                .collect(),
+            rms_ffn_weight: rms_ffn_weight
+                .iter()
+                .map(|&x| utils::encode_fixed(x))
+                .collect(),
             wq: wq.iter().map(|&x| utils::encode_fixed(x)).collect(),
             wk: wk.iter().map(|&x| utils::encode_fixed(x)).collect(),
             wv: wv.iter().map(|&x| utils::encode_fixed(x)).collect(),
@@ -208,18 +219,30 @@ impl Transformer {
             w1: w1.iter().map(|&x| utils::encode_fixed(x)).collect(),
             w2: w2.iter().map(|&x| utils::encode_fixed(x)).collect(),
             w3: w3.iter().map(|&x| utils::encode_fixed(x)).collect(),
-            rms_final_weight: rms_final_weight.iter().map(|&x| utils::encode_fixed(x)).collect(),
+            rms_final_weight: rms_final_weight
+                .iter()
+                .map(|&x| utils::encode_fixed(x))
+                .collect(),
             wcls: if shared_weights {
                 None
             } else {
-                Some(get_weights(vocab_size * dim, false).iter().map(|&x| utils::encode_fixed(x)).collect())
+                Some(
+                    get_weights(vocab_size * dim, false)
+                        .iter()
+                        .map(|&x| utils::encode_fixed(x))
+                        .collect(),
+                )
             },
         };
 
         Ok(weights)
     }
 
-    pub fn forward(&mut self, token: i32, pos: i32) -> Result<&[FixedPoint], Box<dyn std::error::Error>> {
+    pub fn forward(
+        &mut self,
+        token: i32,
+        pos: i32,
+    ) -> Result<&[FixedPoint], Box<dyn std::error::Error>> {
         let p = &self.config;
         let w = &self.weights;
         let s = &mut self.state;
@@ -288,8 +311,8 @@ impl Transformer {
                     };
                     let v0 = vec[i];
                     let v1 = vec[i + 1];
-                    vec[i] = v0.mult(fcr) - v1.mult(fci);
-                    vec[i + 1] = v0.mult(fci) + v1.mult(fcr);
+                    vec[i] = v0.mul(fcr) - v1.mul(fci);
+                    vec[i + 1] = v0.mul(fci) + v1.mul(fcr);
                 }
             }
 
@@ -313,7 +336,7 @@ impl Transformer {
                         .zip(k.iter())
                         .map(|(&qi, &ki)| {
                             // qi * ki
-                            qi.mult(ki) as i128
+                            qi.mul(ki) as i128
                         })
                         .sum::<i128>()
                         / head_size_sqrt as i128;
@@ -336,7 +359,7 @@ impl Transformer {
 
                     // Accumulate weighted value
                     for i in 0..head_size {
-                        xb[i] += a.mult(v[i]);
+                        xb[i] += a.mul(v[i]);
                     }
                 }
             }
@@ -383,7 +406,9 @@ impl Transformer {
             for i in 0..hidden_dim {
                 let val = s.hb[i];
                 // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
-                s.hb[i] = val * (FixedPoint::one() / (FixedPoint::one() + utils::exp_fixed(-val))) * s.hb2[i];
+                s.hb[i] = val
+                    * (FixedPoint::one() / (FixedPoint::one() + utils::exp_fixed(-val)))
+                    * s.hb2[i];
             }
 
             // Final matmul to get the output of the ffn
@@ -423,7 +448,6 @@ impl Transformer {
         Ok(&self.state.logits)
     }
 }
-
 
 // Helper implementation for RunState
 impl RunState {
