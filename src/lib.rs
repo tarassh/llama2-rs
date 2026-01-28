@@ -6,6 +6,7 @@ use tokenizer::Tokenizer;
 pub mod model;
 pub mod sampler;
 pub mod tokenizer;
+pub mod trace;
 pub mod utils;
 
 /// Returns the current time in milliseconds since the Unix epoch
@@ -22,6 +23,7 @@ pub fn generate(
     sampler: &mut Sampler,
     input_prompt: &str,
     steps: i32,
+    mut trace: Option<&mut trace::ExecutionTrace>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 
@@ -46,6 +48,11 @@ pub fn generate(
     while pos < steps {
         // Forward the transformer to get logits for the next token
         let logits = transformer.forward(token, pos)?;
+
+        // Record trace if enabled
+        if let Some(ref mut t) = trace {
+            t.record_step(pos, token, &logits);
+        }
 
         // Advance the state machine
         let next = if (pos as usize) < prompt_tokens.len() - 1 {
@@ -74,6 +81,11 @@ pub fn generate(
         }
     }
     println!();
+
+    // Finalize trace if enabled
+    if let Some(ref mut t) = trace {
+        t.finalize();
+    }
 
     // Report achieved tok/s (pos-1 because the timer starts after first iteration)
     if pos > 1 {
