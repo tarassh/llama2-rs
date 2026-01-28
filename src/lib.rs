@@ -6,6 +6,7 @@ use tokenizer::Tokenizer;
 pub mod model;
 pub mod sampler;
 pub mod tokenizer;
+pub mod trace;
 pub mod utils;
 
 /// Returns the current time in milliseconds since the Unix epoch
@@ -22,6 +23,7 @@ pub fn generate(
     sampler: &mut Sampler,
     input_prompt: &str,
     steps: i32,
+    mut trace: Option<&mut trace::ExecutionTrace>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write;
 
@@ -55,6 +57,17 @@ pub fn generate(
             // Sample the next token from the logits
             sampler.sample(&logits)
         };
+
+        // Decode and print the token
+        let piece = tokenizer.decode(token, next);
+        print!("{}", piece);
+        std::io::stdout().flush()?;
+
+        // Record trace if enabled (after decoding so we have the text)
+        if let Some(ref mut t) = trace {
+            t.record_step(pos, token, piece.clone(), &logits);
+        }
+
         pos += 1;
 
         // Data-dependent terminating condition: the BOS (=1) token delimits sequences
@@ -62,10 +75,6 @@ pub fn generate(
             break;
         }
 
-        // Decode and print the token
-        let piece = tokenizer.decode(token, next);
-        print!("{}", piece);
-        std::io::stdout().flush()?;
         token = next;
 
         // Init the timer here because the first iteration can be slower
@@ -74,6 +83,11 @@ pub fn generate(
         }
     }
     println!();
+
+    // Finalize trace if enabled
+    if let Some(ref mut t) = trace {
+        t.finalize();
+    }
 
     // Report achieved tok/s (pos-1 because the timer starts after first iteration)
     if pos > 1 {
