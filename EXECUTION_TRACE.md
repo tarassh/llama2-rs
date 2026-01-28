@@ -25,14 +25,17 @@ Traditional logging is insufficient because:
 During text generation, at each iteration the system captures:
 - **Position** (`pos`): Current position in the sequence
 - **Token** (`token`): The token ID at this position
+- **Text** (`text`): The decoded text fragment (for provenance)
 - **Logits Hash**: SHA-256 hash of the complete logits vector
 
-These three values form a `TraceEntry`, which is itself hashed:
+These values form a `TraceEntry`. The cryptographic commitment is computed from:
 
 ```
-TraceEntry = (pos, token, logits_hash)
-EntryHash = SHA256(pos || token || logits_hash)
+TraceEntry = (pos, token, text, logits_hash)
+EntryHash = SHA256(pos || token || logits_hash)  // Note: text not in hash
 ```
+
+The `text` field provides human-readable provenance but is not part of the hash, since the token ID already uniquely identifies the text.
 
 ### Merkle Tree Construction
 
@@ -200,10 +203,12 @@ Total entries: 100
 Verifying iteration 50:
 Expected position: 50
 Expected token: 1234
+Expected text: " the"
 Expected logits hash: [5f, 9a, 3c, ...]
 
 Actual position: 50
 Actual token: 1234
+Actual text: " the"
 Actual logits hash: [5f, 9a, 3c, ...]
 
 Merkle proof verification: VALID
@@ -211,6 +216,52 @@ Merkle root: [f5, b6, eb, b9, 78, 5b, 94, 2b, ...]
 
 Verification SUCCESSFUL!
 ```
+
+### Explain Text Provenance
+
+Show which text fragments correspond to which cryptographic commitments:
+
+```bash
+cargo run --release -- stories42M.bin \
+  --explain-text execution.trace
+```
+
+**Output:**
+```
+=== Execution Trace Explanation ===
+File: execution.trace
+Model: stories42M.bin
+Prompt: "Once upon a time"
+Total iterations: 100
+Merkle root: [f5, b6, eb, b9, ...]
+
+Iter   Token      Text                           Logits Hash
+========================================================================================================================
+0      1          "Once"                         [86,70,ac,...,54,20]
+      └─ Entry hash: [f6,7d,...,f7,ee] | Proof siblings: 7 | Verifiable: ✓
+1      9038       " upon"                        [31,29,66,...,ac,38]
+2      2501       " a"                           [51,dc,aa,...,44,6c]
+3      263        " time"                        [b0,3e,ef,...,6f,43]
+4      931        ","                            [99,7d,08,...,cd,e5]
+5      29892      " there"                       [b6,c7,db,...,59,5f]
+...
+50     1234       " the"                         [5f,9a,3c,...,12,34]
+      └─ Entry hash: [a3,2f,...,8d,1b] | Proof siblings: 7 | Verifiable: ✓
+...
+```
+
+This mapping proves:
+- **Iteration 0** produced the text "Once" with token ID 1
+- **Iteration 5** produced " there" with token ID 29892
+- **Iteration 50** produced " the" with token ID 1234
+- Each has a unique cryptographic commitment (entry hash and logits hash)
+- Each can be independently verified with a Merkle proof
+
+**Use Cases:**
+- Prove which iteration generated specific text: "The word 'there' came from iteration 5"
+- Audit text provenance: "This sentence spans iterations 10-25"
+- Debug generation: "Why did iteration 42 produce this unexpected token?"
+- Compliance: "Demonstrate exact source of generated content"
 
 ### Verification Failures
 

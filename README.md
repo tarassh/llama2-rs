@@ -57,6 +57,14 @@ cargo run --release -- stories42M.bin \
   --verify-iteration 50
 ```
 
+**Explain text provenance:**
+```bash
+cargo run --release -- stories42M.bin \
+  --explain-text execution.trace
+```
+
+This shows which text fragments correspond to which iterations, with cryptographic proof.
+
 See [EXECUTION_TRACE.md](EXECUTION_TRACE.md) for comprehensive documentation.
 
 ## Features Flags
