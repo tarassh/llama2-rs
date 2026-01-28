@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use llama2_rs::model::Transformer;
 use llama2_rs::sampler::Sampler;
 use llama2_rs::tokenizer::Tokenizer;
+use llama2_rs::trace::{ExecutionTrace, TraceMetadata};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let matches = Command::new("run")
         .version("1.0")
@@ -63,6 +64,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .value_name("string")
             .help("(optional) system prompt in chat mode")
             .value_parser(clap::value_parser!(String)))
+        .arg(Arg::new("trace")
+            .long("trace")
+            .value_name("file")
+            .help("Enable execution tracing and save to file")
+            .value_parser(clap::value_parser!(String)))
+        .arg(Arg::new("verify")
+            .long("verify")
+            .value_name("file")
+            .help("Verify trace file at specific iteration (use with --verify-iteration)")
+            .value_parser(clap::value_parser!(String)))
+        .arg(Arg::new("verify_iteration")
+            .long("verify-iteration")
+            .value_name("int")
+            .help("Iteration to verify (use with --verify)")
+            .value_parser(clap::value_parser!(usize)))
         .get_matches();
 
     // Get current time as default seed
@@ -106,6 +122,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_one::<String>("system_prompt")
         .map(|s| s.as_str())
         .unwrap_or("");
+    let trace_file = matches
+        .get_one::<String>("trace")
+        .map(|s| s.as_str());
+    let verify_file = matches
+        .get_one::<String>("verify")
+        .map(|s| s.as_str());
+    let verify_iteration = matches
+        .get_one::<usize>("verify_iteration")
+        .copied();
 
     // Debug output
     println!("Checkpoint: {}", checkpoint);
@@ -130,15 +155,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load the sampler
     let mut sampler = Sampler::new(model.config.vocab_size, temperature, p_value, seed);
 
+    // Handle verification mode
+    if let Some(verify_path) = verify_file {
+        let iteration = verify_iteration.ok_or("--verify-iteration is required with --verify")?;
+        verify_trace(verify_path, iteration, &mut model, &mut tokenizer, &mut sampler, input_prompt)?;
+        return Ok(());
+    }
+
     match mode {
         "generate" => {
+            // Create trace if requested
+            let mut trace = trace_file.map(|_| {
+                ExecutionTrace::new(TraceMetadata {
+                    model_path: checkpoint.clone(),
+                    prompt: input_prompt.to_string(),
+                    steps: steps as usize,
+                })
+            });
+
             llama2_rs::generate(
                 &mut model,
                 &mut tokenizer,
                 &mut sampler,
                 input_prompt,
                 steps,
+                trace.as_mut(),
             )?;
+
+            // Save trace if created
+            if let Some(t) = trace {
+                if let Some(path) = trace_file {
+                    t.save(path)?;
+                    if let Some(root) = t.root() {
+                        eprintln!("Trace saved to: {}", path);
+                        eprintln!("Merkle root: {:02x?}", root);
+                    }
+                }
+            }
         }
         _ => {
             println!("Invalid mode: {}", mode);
@@ -147,4 +200,106 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn verify_trace(
+    trace_path: &str,
+    iteration: usize,
+    transformer: &mut Transformer,
+    tokenizer: &mut Tokenizer,
+    sampler: &mut Sampler,
+    input_prompt: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Load the trace
+    let trace = ExecutionTrace::load(trace_path)?;
+    eprintln!("Loaded trace from: {}", trace_path);
+    eprintln!("Total entries: {}", trace.entry_count());
+
+    // Validate iteration
+    if iteration >= trace.entry_count() {
+        return Err(format!(
+            "Iteration {} out of bounds (trace has {} entries)",
+            iteration,
+            trace.entry_count()
+        )
+        .into());
+    }
+
+    // Get the expected entry
+    let expected_entry = trace.get_entry(iteration).ok_or("Failed to get trace entry")?;
+    eprintln!("\nVerifying iteration {}:", iteration);
+    eprintln!("Expected position: {}", expected_entry.pos);
+    eprintln!("Expected token: {}", expected_entry.token);
+    eprintln!("Expected logits hash: {:02x?}", expected_entry.logits_hash);
+
+    // Replay generation up to target iteration
+    let input_prompt = if input_prompt.is_empty() { "" } else { input_prompt };
+    let prompt_tokens = tokenizer.encode(input_prompt, 1, 0);
+    if prompt_tokens.is_empty() {
+        return Err("Expected at least 1 prompt token".into());
+    }
+
+    let mut token = prompt_tokens[0];
+    let mut pos = 0i32;
+
+    while pos <= expected_entry.pos {
+        // Forward pass
+        let logits = transformer.forward(token, pos)?;
+
+        // Check if we're at the target iteration
+        if pos == expected_entry.pos {
+            // Verify token
+            if token != expected_entry.token {
+                eprintln!("\nVerification FAILED!");
+                eprintln!("Token mismatch at position {}", pos);
+                eprintln!("Expected: {}", expected_entry.token);
+                eprintln!("Got: {}", token);
+                return Err("Token mismatch".into());
+            }
+
+            // Verify logits hash
+            let actual_hash = llama2_rs::trace::hash_logits(&logits);
+            if actual_hash != expected_entry.logits_hash {
+                eprintln!("\nVerification FAILED!");
+                eprintln!("Logits hash mismatch at position {}", pos);
+                eprintln!("Expected: {:02x?}", expected_entry.logits_hash);
+                eprintln!("Got: {:02x?}", actual_hash);
+                return Err("Logits hash mismatch".into());
+            }
+
+            eprintln!("\nActual position: {}", pos);
+            eprintln!("Actual token: {}", token);
+            eprintln!("Actual logits hash: {:02x?}", actual_hash);
+
+            // Verify Merkle proof
+            let proof = trace.generate_proof(iteration).ok_or("Failed to generate proof")?;
+            let proof_valid = proof.verify();
+
+            eprintln!("\nMerkle proof verification: {}", if proof_valid { "VALID" } else { "INVALID" });
+            eprintln!("Merkle root: {:02x?}", proof.root);
+
+            if !proof_valid {
+                return Err("Merkle proof verification failed".into());
+            }
+
+            eprintln!("\nVerification SUCCESSFUL!");
+            return Ok(());
+        }
+
+        // Advance state
+        let next = if (pos as usize) < prompt_tokens.len() - 1 {
+            prompt_tokens[pos as usize + 1]
+        } else {
+            sampler.sample(&logits)
+        };
+        pos += 1;
+
+        if next == 1 {
+            return Err(format!("Generation ended at pos {} before reaching target iteration {}", pos - 1, iteration).into());
+        }
+
+        token = next;
+    }
+
+    Err("Failed to reach target iteration".into())
 }
