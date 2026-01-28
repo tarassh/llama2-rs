@@ -49,11 +49,6 @@ pub fn generate(
         // Forward the transformer to get logits for the next token
         let logits = transformer.forward(token, pos)?;
 
-        // Record trace if enabled
-        if let Some(ref mut t) = trace {
-            t.record_step(pos, token, &logits);
-        }
-
         // Advance the state machine
         let next = if (pos as usize) < prompt_tokens.len() - 1 {
             // If we are still processing the input prompt, force the next prompt token
@@ -62,6 +57,17 @@ pub fn generate(
             // Sample the next token from the logits
             sampler.sample(&logits)
         };
+
+        // Decode and print the token
+        let piece = tokenizer.decode(token, next);
+        print!("{}", piece);
+        std::io::stdout().flush()?;
+
+        // Record trace if enabled (after decoding so we have the text)
+        if let Some(ref mut t) = trace {
+            t.record_step(pos, token, piece.clone(), &logits);
+        }
+
         pos += 1;
 
         // Data-dependent terminating condition: the BOS (=1) token delimits sequences
@@ -69,10 +75,6 @@ pub fn generate(
             break;
         }
 
-        // Decode and print the token
-        let piece = tokenizer.decode(token, next);
-        print!("{}", piece);
-        std::io::stdout().flush()?;
         token = next;
 
         // Init the timer here because the first iteration can be slower

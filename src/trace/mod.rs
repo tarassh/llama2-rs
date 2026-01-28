@@ -33,8 +33,8 @@ impl ExecutionTrace {
         }
     }
 
-    pub fn record_step(&mut self, pos: i32, token: i32, logits: &[f32]) {
-        let entry = TraceEntry::new(pos, token, logits);
+    pub fn record_step(&mut self, pos: i32, token: i32, text: String, logits: &[f32]) {
+        let entry = TraceEntry::new(pos, token, text, logits);
         self.entries.push(entry);
     }
 
@@ -90,7 +90,7 @@ mod tests {
         let logits = vec![1.0, 2.0, 3.0];
 
         for i in 0..5 {
-            trace.record_step(i, i * 2, &logits);
+            trace.record_step(i, i * 2, format!("text{}", i), &logits);
         }
 
         trace.finalize();
@@ -117,7 +117,7 @@ mod tests {
         let logits = vec![1.0, 2.0, 3.0];
 
         for i in 0..3 {
-            trace.record_step(i, i * 10, &logits);
+            trace.record_step(i, i * 10, format!("word{}", i), &logits);
         }
 
         trace.finalize();

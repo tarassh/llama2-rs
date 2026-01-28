@@ -45,7 +45,7 @@ mod tests {
         // Add some entries
         let logits = vec![1.0, 2.0, 3.0];
         for i in 0..10 {
-            trace.record_step(i, i * 2, &logits);
+            trace.record_step(i, i * 2, format!("token{}", i), &logits);
         }
         trace.finalize();
 

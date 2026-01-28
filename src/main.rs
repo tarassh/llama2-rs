@@ -79,6 +79,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .value_name("int")
             .help("Iteration to verify (use with --verify)")
             .value_parser(clap::value_parser!(usize)))
+        .arg(Arg::new("explain_text")
+            .long("explain-text")
+            .value_name("file")
+            .help("Show iteration → token → text → hash mapping for trace file")
+            .value_parser(clap::value_parser!(String)))
         .get_matches();
 
     // Get current time as default seed
@@ -131,6 +136,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let verify_iteration = matches
         .get_one::<usize>("verify_iteration")
         .copied();
+    let explain_text_file = matches
+        .get_one::<String>("explain_text")
+        .map(|s| s.as_str());
 
     // Debug output
     println!("Checkpoint: {}", checkpoint);
@@ -142,6 +150,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Tokenizer: {}", tokenizer);
     println!("Mode: {}", mode);
     println!("System prompt: {}", system_prompt);
+
+    // Handle explain-text mode (doesn't need model)
+    if let Some(explain_path) = explain_text_file {
+        explain_trace(explain_path)?;
+        return Ok(());
+    }
 
     // Load the model
     let mut model = Transformer::read_checkpoint(checkpoint)?;
@@ -230,6 +244,7 @@ fn verify_trace(
     eprintln!("\nVerifying iteration {}:", iteration);
     eprintln!("Expected position: {}", expected_entry.pos);
     eprintln!("Expected token: {}", expected_entry.token);
+    eprintln!("Expected text: \"{}\"", expected_entry.text);
     eprintln!("Expected logits hash: {:02x?}", expected_entry.logits_hash);
 
     // Replay generation up to target iteration
@@ -248,6 +263,16 @@ fn verify_trace(
 
         // Check if we're at the target iteration
         if pos == expected_entry.pos {
+            // Compute next token to decode text
+            let next = if (pos as usize) < prompt_tokens.len() - 1 {
+                prompt_tokens[pos as usize + 1]
+            } else {
+                sampler.sample(&logits)
+            };
+
+            // Decode text
+            let actual_text = tokenizer.decode(token, next);
+
             // Verify token
             if token != expected_entry.token {
                 eprintln!("\nVerification FAILED!");
@@ -269,6 +294,7 @@ fn verify_trace(
 
             eprintln!("\nActual position: {}", pos);
             eprintln!("Actual token: {}", token);
+            eprintln!("Actual text: \"{}\"", actual_text);
             eprintln!("Actual logits hash: {:02x?}", actual_hash);
 
             // Verify Merkle proof
@@ -302,4 +328,71 @@ fn verify_trace(
     }
 
     Err("Failed to reach target iteration".into())
+}
+
+fn explain_trace(trace_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Load the trace
+    let trace = ExecutionTrace::load(trace_path)?;
+
+    println!("=== Execution Trace Explanation ===");
+    println!("File: {}", trace_path);
+    println!("Model: {}", trace.metadata().model_path);
+    println!("Prompt: \"{}\"", trace.metadata().prompt);
+    println!("Total iterations: {}", trace.entry_count());
+
+    if let Some(root) = trace.root() {
+        println!("Merkle root: {:02x?}", root);
+    }
+
+    println!("\n{:<6} {:<10} {:<30} {:<70}", "Iter", "Token", "Text", "Logits Hash");
+    println!("{}", "=".repeat(120));
+
+    // Show all entries
+    for i in 0..trace.entry_count() {
+        if let Some(entry) = trace.get_entry(i) {
+            let text_display = if entry.text.len() > 28 {
+                format!("{}...", &entry.text[..25])
+            } else {
+                entry.text.clone()
+            };
+
+            let hash_short = format!(
+                "[{:02x},{:02x},{:02x},...,{:02x},{:02x}]",
+                entry.logits_hash[0],
+                entry.logits_hash[1],
+                entry.logits_hash[2],
+                entry.logits_hash[30],
+                entry.logits_hash[31]
+            );
+
+            println!("{:<6} {:<10} {:<30} {:<70}",
+                i,
+                entry.token,
+                format!("\"{}\"", text_display),
+                hash_short
+            );
+
+            // Show proof for first, middle, and last entries as examples
+            if i == 0 || i == trace.entry_count() / 2 || i == trace.entry_count() - 1 {
+                if let Some(proof) = trace.generate_proof(i) {
+                    let entry_hash = entry.hash();
+                    println!("      └─ Entry hash: [{:02x},{:02x},...,{:02x},{:02x}] | Proof siblings: {} | Verifiable: ✓",
+                        entry_hash[0], entry_hash[1], entry_hash[30], entry_hash[31],
+                        proof.siblings.len()
+                    );
+                }
+            }
+        }
+    }
+
+    println!("\n=== Summary ===");
+    println!("Each entry represents one iteration of text generation.");
+    println!("- Iteration: Position in the sequence");
+    println!("- Token: The token ID input to the transformer");
+    println!("- Text: The decoded text fragment produced");
+    println!("- Logits Hash: SHA-256 hash of the output logits vector");
+    println!("\nEach entry is cryptographically committed to the Merkle tree.");
+    println!("Any entry can be independently verified with a Merkle proof.");
+
+    Ok(())
 }

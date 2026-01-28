@@ -5,15 +5,17 @@ use sha2::{Digest, Sha256};
 pub struct TraceEntry {
     pub pos: i32,
     pub token: i32,
+    pub text: String,
     pub logits_hash: [u8; 32],
 }
 
 impl TraceEntry {
-    pub fn new(pos: i32, token: i32, logits: &[f32]) -> Self {
+    pub fn new(pos: i32, token: i32, text: String, logits: &[f32]) -> Self {
         let logits_hash = hash_logits(logits);
         Self {
             pos,
             token,
+            text,
             logits_hash,
         }
     }
@@ -50,9 +52,20 @@ mod tests {
     #[test]
     fn test_trace_entry_hash_deterministic() {
         let logits = vec![1.0, 2.0, 3.0];
-        let entry1 = TraceEntry::new(0, 42, &logits);
-        let entry2 = TraceEntry::new(0, 42, &logits);
+        let entry1 = TraceEntry::new(0, 42, "test".to_string(), &logits);
+        let entry2 = TraceEntry::new(0, 42, "test".to_string(), &logits);
         assert_eq!(entry1.hash(), entry2.hash());
+    }
+
+    #[test]
+    fn test_trace_entry_text_not_in_hash() {
+        let logits = vec![1.0, 2.0, 3.0];
+        let entry1 = TraceEntry::new(0, 42, "hello".to_string(), &logits);
+        let entry2 = TraceEntry::new(0, 42, "world".to_string(), &logits);
+        // Hash should be same because text is not part of hash
+        assert_eq!(entry1.hash(), entry2.hash());
+        // But text should be different
+        assert_ne!(entry1.text, entry2.text);
     }
 
     #[test]
